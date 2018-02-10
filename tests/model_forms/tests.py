@@ -2606,6 +2606,31 @@ class OtherModelFormTests(TestCase):
                 (red_item.pk, 'red'),
             ))
 
+    def test_form_fields_which_use_to_field_name(self):
+        apple = Inventory.objects.create(barcode=86, name='Apple')
+        Inventory.objects.create(barcode=22, name='Pear')
+        core = Inventory.objects.create(barcode=87, name='Core', parent=apple)
+
+        class PickParentForm(forms.ModelForm):
+
+            parent = forms.ModelChoiceField(
+                Inventory.objects.all(),
+                to_field_name='name',
+            )
+
+            class Meta:
+                model = Inventory
+                fields = (
+                    'parent',
+                )
+
+        form = PickParentForm(instance=core)
+        self.assertHTMLEqual(str(form['parent']), '''<select name="parent" id="id_parent" required>
+        <option value="Apple" selected>Apple</option>
+        <option value="Core">Core</option>
+        <option value="Pear">Pear</option>
+        </select>''')
+
     def test_foreignkeys_which_use_to_field(self):
         apple = Inventory.objects.create(barcode=86, name='Apple')
         Inventory.objects.create(barcode=22, name='Pear')
