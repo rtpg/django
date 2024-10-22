@@ -203,7 +203,7 @@ class BaseDatabaseWrapper:
             self.features.minimum_database_version is not None
             and db_version < self.features.minimum_database_version
         ):
-            str_db_version = ".".join(map(str, self.get_database_version()))
+            str_db_version = ".".join(map(str, db_version))
             min_db_version = ".".join(map(str, self.features.minimum_database_version))
             raise NotSupportedError(
                 f"{self.display_name} {min_db_version} or later is required "
