@@ -731,11 +731,11 @@ class BaseDatabaseWrapper:
         start_transaction_under_autocommit = (
             force_begin_transaction_with_broken_autocommit
             and not autocommit
-            and hasattr(self, "_start_transaction_under_autocommit")
+            and hasattr(self, "_astart_transaction_under_autocommit")
         )
 
         if start_transaction_under_autocommit:
-            self._start_transaction_under_autocommit()
+            await self._astart_transaction_under_autocommit()
         elif autocommit:
             await self._aset_autocommit(autocommit)
         else:
