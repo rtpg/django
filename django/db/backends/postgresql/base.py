@@ -514,9 +514,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
     async def _aconfigure_connection(self, connection):
         # This function is called from init_connection_state and from the
-        # psycopg pool itself after a connection is opened. Make sure that
-        # whatever is done here does not access anything on self aside from
-        # variables.
+        # psycopg pool itself after a connection is opened.
 
         # Commit after setting the time zone.
         commit_tz = await self._aconfigure_timezone(connection)
