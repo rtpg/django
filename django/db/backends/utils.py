@@ -264,10 +264,11 @@ class AsyncCursorDebugWrapper(AsyncCursorWrapper):
                 {
                     "sql": "%s times: %s" % (times, sql) if many else sql,
                     "time": "%.3f" % duration,
+                    "async": True,
                 }
             )
             logger.debug(
-                "(%.3f) %s; args=%s; alias=%s",
+                "(%.3f) %s; args=%s; alias=%s; async=True",
                 duration,
                 sql,
                 params,
@@ -277,6 +278,7 @@ class AsyncCursorDebugWrapper(AsyncCursorWrapper):
                     "sql": sql,
                     "params": params,
                     "alias": self.db.alias,
+                    "async": True,
                 },
             )
 
@@ -294,18 +296,21 @@ def debug_transaction(connection, sql):
                 {
                     "sql": "%s" % sql,
                     "time": "%.3f" % duration,
+                    "async": connection.supports_async,
                 }
             )
             logger.debug(
-                "(%.3f) %s; args=%s; alias=%s",
+                "(%.3f) %s; args=%s; alias=%s; async=%s",
                 duration,
                 sql,
                 None,
                 connection.alias,
+                connection.supports_async,
                 extra={
                     "duration": duration,
                     "sql": sql,
                     "alias": connection.alias,
+                    "async": connection.supports_async,
                 },
             )
 
