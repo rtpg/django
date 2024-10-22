@@ -366,6 +366,8 @@ class BaseDatabaseWrapper:
         """
         Validate the connection is usable and perform database cursor wrapping.
         """
+
+        self.validate_thread_sharing()
         if self.queries_logged:
             wrapped_cursor = self.make_debug_async_cursor(cursor)
         else:
