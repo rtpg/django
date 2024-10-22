@@ -7,7 +7,7 @@ import time
 import warnings
 import zoneinfo
 from collections import deque
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -975,25 +975,6 @@ class BaseDatabaseWrapper:
         finally:
             if must_close:
                 self.close()
-
-    @asynccontextmanager
-    async def atemporary_connection(self):
-        """
-        Context manager that ensures that a connection is established, and
-        if it opened one, closes it to avoid leaving a dangling connection.
-        This is useful for operations outside of the request-response cycle.
-
-        Provide a cursor: async with self.atemporary_connection() as cursor: ...
-        """
-        # unused
-
-        must_close = self.aconnection is None
-        try:
-            async with self.acursor() as cursor:
-                yield cursor
-        finally:
-            if must_close:
-                await self.aclose()
 
     @contextmanager
     def _nodb_cursor(self):
