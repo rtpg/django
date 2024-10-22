@@ -423,7 +423,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         # self.isolation_level must be set:
         # - after connecting to the database in order to obtain the database's
         #   default when no value is explicitly specified in options.
-        # - before calling _set_autocommit() because if autocommit is on, that
+        # - before calling _aset_autocommit() because if autocommit is on, that
         #   will set connection.isolation_level to ISOLATION_LEVEL_AUTOCOMMIT.
         options = self.settings_dict["OPTIONS"]
         set_isolation_level = False
@@ -861,11 +861,11 @@ if is_psycopg3:
         prepareable SQL (#20516).
 
         ClientCursorMixin forces the usage of client-side bindings while
-        ServerCursor implements the logic required to declare and scroll
+        AsyncServerCursor implements the logic required to declare and scroll
         through named cursors.
 
         Mixing ClientCursorMixin in wouldn't be necessary if Cursor allowed to
-        specify how parameters should be bound instead, which ServerCursor
+        specify how parameters should be bound instead, which AsyncServerCursor
         would inherit, but that's not the case.
         """
 

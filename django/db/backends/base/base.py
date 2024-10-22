@@ -194,7 +194,7 @@ class BaseDatabaseWrapper:
     async def aget_database_version(self):
         """Return a tuple of the database's version."""
         raise NotSupportedError(
-            "subclasses of BaseDatabaseWrapper may require a aget_database_version() "
+            "subclasses of BaseDatabaseWrapper may require an aget_database_version() "
             "method."
         )
 
@@ -245,7 +245,7 @@ class BaseDatabaseWrapper:
     async def aget_new_connection(self, conn_params):
         """Open a connection to the database."""
         raise NotSupportedError(
-            "subclasses of BaseDatabaseWrapper may require a get_new_connection() "
+            "subclasses of BaseDatabaseWrapper may require an aget_new_connection() "
             "method"
         )
 
@@ -656,7 +656,7 @@ class BaseDatabaseWrapper:
         Backend-specific implementation to enable or disable autocommit.
         """
         raise NotSupportedError(
-            "subclasses of BaseDatabaseWrapper may require a _set_autocommit() method"
+            "subclasses of BaseDatabaseWrapper may require an _aset_autocommit() method"
         )
 
     # ##### Generic transaction management methods #####
@@ -981,7 +981,7 @@ class BaseDatabaseWrapper:
         if it opened one, closes it to avoid leaving a dangling connection.
         This is useful for operations outside of the request-response cycle.
 
-        Provide a cursor: async with self.temporary_connection() as cursor: ...
+        Provide a cursor: async with self.atemporary_connection() as cursor: ...
         """
         # unused
 

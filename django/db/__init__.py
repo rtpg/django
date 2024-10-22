@@ -42,7 +42,7 @@ async_connections = AsyncConnectionHandler()
 
 class new_connection:
     """
-    Asynchronous context manager to instantiate new async connectons.
+    Asynchronous context manager to instantiate new async connections.
 
     """
 
