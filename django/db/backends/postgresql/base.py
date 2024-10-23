@@ -379,8 +379,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             )
         return conn_params
 
-    @async_unsafe
-    def get_new_connection(self, conn_params):
+    def _get_isolation_level(self):
         # self.isolation_level must be set:
         # - after connecting to the database in order to obtain the database's
         #   default when no value is explicitly specified in options.
@@ -391,17 +390,22 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         try:
             isolation_level_value = options["isolation_level"]
         except KeyError:
-            self.isolation_level = IsolationLevel.READ_COMMITTED
+            isolation_level = IsolationLevel.READ_COMMITTED
         else:
-            # Set the isolation level to the value from OPTIONS.
             try:
-                self.isolation_level = IsolationLevel(isolation_level_value)
+                isolation_level = IsolationLevel(isolation_level_value)
                 set_isolation_level = True
             except ValueError:
                 raise ImproperlyConfigured(
                     f"Invalid transaction isolation level {isolation_level_value} "
                     f"specified. Use one of the psycopg.IsolationLevel values."
                 )
+        return isolation_level, set_isolation_level
+
+    @async_unsafe
+    def get_new_connection(self, conn_params):
+        isolation_level, set_isolation_level = self._get_isolation_level()
+        self.isolation_level = isolation_level
         if self.pool:
             # If nothing else has opened the pool, open it now.
             self.pool.open()
@@ -409,7 +413,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         else:
             connection = self.Database.connect(**conn_params)
         if set_isolation_level:
-            connection.isolation_level = self.isolation_level
+            connection.isolation_level = isolation_level
         if not is_psycopg3:
             # Register dummy loads() to avoid a round trip from psycopg2's
             # decode to json.dumps() to json.loads(), when using a custom
@@ -420,27 +424,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         return connection
 
     async def aget_new_connection(self, conn_params):
-        # self.isolation_level must be set:
-        # - after connecting to the database in order to obtain the database's
-        #   default when no value is explicitly specified in options.
-        # - before calling _aset_autocommit() because if autocommit is on, that
-        #   will set connection.isolation_level to ISOLATION_LEVEL_AUTOCOMMIT.
-        options = self.settings_dict["OPTIONS"]
-        set_isolation_level = False
-        try:
-            isolation_level_value = options["isolation_level"]
-        except KeyError:
-            self.isolation_level = IsolationLevel.READ_COMMITTED
-        else:
-            # Set the isolation level to the value from OPTIONS.
-            try:
-                self.isolation_level = IsolationLevel(isolation_level_value)
-                set_isolation_level = True
-            except ValueError:
-                raise ImproperlyConfigured(
-                    f"Invalid transaction isolation level {isolation_level_value} "
-                    f"specified. Use one of the psycopg.IsolationLevel values."
-                )
+        isolation_level, set_isolation_level = self._get_isolation_level()
+        self.isolation_level = isolation_level
         if self.apool:
             # If nothing else has opened the pool, open it now.
             await self.apool.open()
@@ -448,7 +433,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         else:
             connection = await self.Database.AsyncConnection.connect(**conn_params)
         if set_isolation_level:
-            connection.isolation_level = self.isolation_level
+            connection.isolation_level = isolation_level
         return connection
 
     def ensure_timezone(self):
