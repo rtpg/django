@@ -675,10 +675,6 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     async def achunked_cursor(self):
         self._named_cursor_idx += 1
         # Get the current async task
-        # Note that right now this is behind @async_unsafe, so this is
-        # unreachable, but in future we'll start loosening this restriction.
-        # For now, it's here so that every use of "threading" is
-        # also async-compatible.
         try:
             current_task = asyncio.current_task()
         except RuntimeError:
