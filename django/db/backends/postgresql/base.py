@@ -572,9 +572,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         if self.aconnection is not None and not self.apool:
             commit = await self._aconfigure_connection(self.aconnection)
 
-            autocommit = await self.aget_autocommit()
-            if commit and not autocommit:
-                await self.aconnection.commit()
+            if commit:
+                autocommit = await self.aget_autocommit()
+                if not autocommit:
+                    await self.aconnection.commit()
 
     @async_unsafe
     def create_cursor(self, name=None):
