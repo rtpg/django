@@ -162,9 +162,16 @@ class AsyncConnectionTests(SimpleTestCase):
 
         async with new_connection():
             conn1 = async_connections.get_connection(DEFAULT_DB_ALIAS)
+            self.assertIsNotNone(conn1.aconnection)
             async with new_connection():
                 conn2 = async_connections.get_connection(DEFAULT_DB_ALIAS)
-                self.assertNotEqual(conn1, conn2)
-            self.assertNotEqual(conn1, conn2)
+                self.assertIsNotNone(conn1.aconnection)
+                self.assertIsNotNone(conn2.aconnection)
+                self.assertNotEqual(conn1.aconnection, conn2.aconnection)
+
+            self.assertIsNotNone(conn1.aconnection)
+            self.assertIsNone(conn2.aconnection)
+        self.assertIsNone(conn1.aconnection)
+
         with self.assertRaises(ConnectionDoesNotExist):
             async_connections.get_connection(DEFAULT_DB_ALIAS)
