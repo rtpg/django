@@ -59,6 +59,7 @@ class new_connection:
 
         async_connections.add_connection(self.using, self.conn)
 
+        await self.conn.aensure_connection()
         if self.force_rollback is True:
             await self.conn.aset_autocommit(False)
 
