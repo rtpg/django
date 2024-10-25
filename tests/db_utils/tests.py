@@ -8,6 +8,7 @@ from unittest import mock
 from django.core.exceptions import ImproperlyConfigured
 from django.db import (
     DEFAULT_DB_ALIAS,
+    NotSupportedError,
     ProgrammingError,
     async_connections,
     connection,
@@ -175,3 +176,9 @@ class AsyncConnectionTests(SimpleTestCase):
 
         with self.assertRaises(ConnectionDoesNotExist):
             async_connections.get_connection(DEFAULT_DB_ALIAS)
+
+    @unittest.skipUnless(connection.supports_async is False, "Sync DB test")
+    async def test_new_connection_on_sync(self):
+        with self.assertRaises(NotSupportedError):
+            async with new_connection():
+                async_connections.get_connection(DEFAULT_DB_ALIAS)
