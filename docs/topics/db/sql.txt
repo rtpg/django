@@ -415,7 +415,12 @@ cursor::
 
     async with new_connection() as connection:
         async with connection.acursor() as c:
-            await c.execute(...)
+            await c.aexecute(...)
+
+Async cursors provide the following methods:
+
+* ``.aexecute()``
+* ``.aexecutemany()``
 
 
 Calling stored procedures

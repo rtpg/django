@@ -590,38 +590,38 @@ class AsyncTransactionTestCase(TransactionTestCase):
             async with new_connection() as connection2:
                 await connection2.aset_autocommit(False)
                 async with connection2.acursor() as cursor2:
-                    await cursor2.execute(
+                    await cursor2.aexecute(
                         "INSERT INTO transactions_reporter "
                         "(first_name, last_name, email) "
                         "VALUES (%s, %s, %s)",
                         ("Sarah", "Hatoff", ""),
                     )
-                    await cursor2.execute("SELECT * FROM transactions_reporter")
                     result = await cursor2.fetchmany()
+                    await cursor2.aexecute("SELECT * FROM transactions_reporter")
                     assert len(result) == 1
 
             async with connection.acursor() as cursor:
-                await cursor.execute("SELECT * FROM transactions_reporter")
                 result = await cursor.fetchmany()
+                await cursor.aexecute("SELECT * FROM transactions_reporter")
                 assert len(result) == 1
 
     async def test_new_connection_nested2(self):
         async with new_connection() as connection:
             async with connection.acursor() as cursor:
-                await cursor.execute(
+                await cursor.aexecute(
                     "INSERT INTO transactions_reporter (first_name, last_name, email) "
                     "VALUES (%s, %s, %s)",
                     ("Sarah", "Hatoff", ""),
                 )
-                await cursor.execute("SELECT * FROM transactions_reporter")
                 result = await cursor.fetchmany()
+                await cursor.aexecute("SELECT * FROM transactions_reporter")
                 assert len(result) == 1
 
             async with new_connection() as connection2:
                 await connection2.aset_autocommit(False)
                 async with connection2.acursor() as cursor2:
-                    await cursor2.execute("SELECT * FROM transactions_reporter")
                     result = await cursor2.fetchmany()
+                    await cursor2.aexecute("SELECT * FROM transactions_reporter")
                     # This connection won't see any rows, because the outer one
                     # hasn't committed yet.
                     assert len(result) == 0
@@ -632,21 +632,21 @@ class AsyncTransactionTestCase(TransactionTestCase):
                 await connection2.aset_autocommit(False)
                 assert id(connection) != id(connection2)
                 async with connection2.acursor() as cursor2:
-                    await cursor2.execute(
+                    await cursor2.aexecute(
                         "INSERT INTO transactions_reporter "
                         "(first_name, last_name, email) "
                         "VALUES (%s, %s, %s)",
                         ("Sarah", "Hatoff", ""),
                     )
-                    await cursor2.execute("SELECT * FROM transactions_reporter")
                     result = await cursor2.fetchmany()
+                    await cursor2.aexecute("SELECT * FROM transactions_reporter")
                     assert len(result) == 1
 
                 # Outermost connection doesn't see what the innermost did, because the
                 # innermost connection hasn't exited yet.
                 async with connection.acursor() as cursor:
-                    await cursor.execute("SELECT * FROM transactions_reporter")
                     result = await cursor.fetchmany()
+                    await cursor.aexecute("SELECT * FROM transactions_reporter")
                     assert len(result) == 0
 
     async def test_asavepoint(self):
@@ -655,17 +655,17 @@ class AsyncTransactionTestCase(TransactionTestCase):
                 sid = await connection.asavepoint()
                 assert sid is not None
 
-                await cursor.execute(
+                await cursor.aexecute(
                     "INSERT INTO transactions_reporter (first_name, last_name, email) "
                     "VALUES (%s, %s, %s)",
                     ("Archibald", "Haddock", ""),
                 )
-                await cursor.execute("SELECT * FROM transactions_reporter")
                 result = await cursor.fetchmany(size=5)
+                await cursor.aexecute("SELECT * FROM transactions_reporter")
                 assert len(result) == 1
                 assert result[0][1:] == ("Archibald", "Haddock", "")
 
                 await connection.asavepoint_rollback(sid)
-                await cursor.execute("SELECT * FROM transactions_reporter")
+                await cursor.aexecute("SELECT * FROM transactions_reporter")
                 result = await cursor.fetchmany(size=5)
                 assert len(result) == 0

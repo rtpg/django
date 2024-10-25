@@ -480,7 +480,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         if new_role := self.settings_dict["OPTIONS"].get("assume_role"):
             async with connection.acursor() as cursor:
                 sql = self.ops.compose_sql("SET ROLE %s", [new_role])
-                await cursor.execute(sql)
+                await cursor.aaexecute(sql)
             return True
         return False
 

@@ -511,7 +511,7 @@ class BaseDatabaseWrapper:
 
     async def _asavepoint(self, sid):
         async with self.acursor() as cursor:
-            await cursor.execute(self.ops.savepoint_create_sql(sid))
+            await cursor.aexecute(self.ops.savepoint_create_sql(sid))
 
     def _savepoint_rollback(self, sid):
         with self.cursor() as cursor:
@@ -519,7 +519,7 @@ class BaseDatabaseWrapper:
 
     async def _asavepoint_rollback(self, sid):
         async with self.acursor() as cursor:
-            await cursor.execute(self.ops.savepoint_rollback_sql(sid))
+            await cursor.aexecute(self.ops.savepoint_rollback_sql(sid))
 
     def _savepoint_commit(self, sid):
         with self.cursor() as cursor:
@@ -527,7 +527,7 @@ class BaseDatabaseWrapper:
 
     async def _asavepoint_commit(self, sid):
         async with self.acursor() as cursor:
-            await cursor.execute(self.ops.savepoint_commit_sql(sid))
+            await cursor.aexecute(self.ops.savepoint_commit_sql(sid))
 
     def _savepoint_allowed(self):
         # Savepoints cannot be created outside a transaction

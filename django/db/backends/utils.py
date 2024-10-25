@@ -135,7 +135,7 @@ class AsyncCursorCtx:
 
 
 class AsyncCursorWrapper(CursorWrapper):
-    async def _execute(self, sql, params, *ignored_wrapper_args):
+    async def _aexecute(self, sql, params, *ignored_wrapper_args):
         # Raise a warning during app initialization (stored_app_configs is only
         # ever set during testing).
         if not apps.ready and not apps.stored_app_configs:
@@ -148,23 +148,18 @@ class AsyncCursorWrapper(CursorWrapper):
             else:
                 return await self.cursor.execute(sql, params)
 
-    async def _execute_with_wrappers(self, sql, params, many, executor):
+    async def _aexecute_with_wrappers(self, sql, params, many, executor):
         context = {"connection": self.db, "cursor": self}
         for wrapper in reversed(self.db.execute_wrappers):
             executor = functools.partial(wrapper, executor)
         return await executor(sql, params, many, context)
 
-    async def execute(self, sql, params=None):
-        return await self._execute_with_wrappers(
-            sql, params, many=False, executor=self._execute
+    async def aexecute(self, sql, params=None):
+        return await self._aexecute_with_wrappers(
+            sql, params, many=False, executor=self._aexecute
         )
 
-    async def executemany(self, sql, param_list):
-        return await self._execute_with_wrappers(
-            sql, param_list, many=True, executor=self._executemany
-        )
-
-    async def _executemany(self, sql, param_list, *ignored_wrapper_args):
+    async def _aexecutemany(self, sql, param_list, *ignored_wrapper_args):
         # Raise a warning during app initialization (stored_app_configs is only
         # ever set during testing).
         if not apps.ready and not apps.stored_app_configs:
@@ -172,6 +167,11 @@ class AsyncCursorWrapper(CursorWrapper):
         self.db.validate_no_broken_transaction()
         with self.db.wrap_database_errors:
             return await self.cursor.executemany(sql, param_list)
+
+    async def aexecutemany(self, sql, param_list):
+        return await self._aexecute_with_wrappers(
+            sql, param_list, many=True, executor=self._aexecutemany
+        )
 
     async def __aenter__(self):
         return self
@@ -235,13 +235,13 @@ class CursorDebugWrapper(CursorWrapper):
 class AsyncCursorDebugWrapper(AsyncCursorWrapper):
     # XXX callproc isn't instrumented at this time.
 
-    async def execute(self, sql, params=None):
+    async def aexecute(self, sql, params=None):
         with self.debug_sql(sql, params, use_last_executed_query=True):
-            return await super().execute(sql, params)
+            return await super().aexecute(sql, params)
 
-    async def executemany(self, sql, param_list):
+    async def aexecutemany(self, sql, param_list):
         with self.debug_sql(sql, param_list, many=True):
-            return await super().executemany(sql, param_list)
+            return await super().aexecutemany(sql, param_list)
 
     @contextmanager
     def debug_sql(
