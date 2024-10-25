@@ -182,6 +182,15 @@ class AsyncCursorWrapper(CursorWrapper):
     async def afetchall(self, *args, **kwargs):
         return await self.cursor.fetchall(*args, **kwargs)
 
+    async def acopy(self, *args, **kwargs):
+        return await self.cursor.copy(*args, **kwargs)
+
+    async def astream(self, *args, **kwargs):
+        return await self.cursor.stream(*args, **kwargs)
+
+    async def ascroll(self, *args, **kwargs):
+        return await self.cursor.ascroll(*args, **kwargs)
+
     async def __aenter__(self):
         return self
 
