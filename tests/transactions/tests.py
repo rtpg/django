@@ -596,13 +596,13 @@ class AsyncTransactionTestCase(TransactionTestCase):
                         "VALUES (%s, %s, %s)",
                         ("Sarah", "Hatoff", ""),
                     )
-                    result = await cursor2.fetchmany()
                     await cursor2.aexecute("SELECT * FROM transactions_reporter")
+                    result = await cursor2.afetchmany()
                     assert len(result) == 1
 
             async with connection.acursor() as cursor:
-                result = await cursor.fetchmany()
                 await cursor.aexecute("SELECT * FROM transactions_reporter")
+                result = await cursor.afetchmany()
                 assert len(result) == 1
 
     async def test_new_connection_nested2(self):
@@ -613,15 +613,15 @@ class AsyncTransactionTestCase(TransactionTestCase):
                     "VALUES (%s, %s, %s)",
                     ("Sarah", "Hatoff", ""),
                 )
-                result = await cursor.fetchmany()
                 await cursor.aexecute("SELECT * FROM transactions_reporter")
+                result = await cursor.afetchmany()
                 assert len(result) == 1
 
             async with new_connection() as connection2:
                 await connection2.aset_autocommit(False)
                 async with connection2.acursor() as cursor2:
-                    result = await cursor2.fetchmany()
                     await cursor2.aexecute("SELECT * FROM transactions_reporter")
+                    result = await cursor2.afetchmany()
                     # This connection won't see any rows, because the outer one
                     # hasn't committed yet.
                     assert len(result) == 0
@@ -638,15 +638,15 @@ class AsyncTransactionTestCase(TransactionTestCase):
                         "VALUES (%s, %s, %s)",
                         ("Sarah", "Hatoff", ""),
                     )
-                    result = await cursor2.fetchmany()
                     await cursor2.aexecute("SELECT * FROM transactions_reporter")
+                    result = await cursor2.afetchmany()
                     assert len(result) == 1
 
                 # Outermost connection doesn't see what the innermost did, because the
                 # innermost connection hasn't exited yet.
                 async with connection.acursor() as cursor:
-                    result = await cursor.fetchmany()
                     await cursor.aexecute("SELECT * FROM transactions_reporter")
+                    result = await cursor.afetchmany()
                     assert len(result) == 0
 
     async def test_asavepoint(self):
@@ -660,8 +660,8 @@ class AsyncTransactionTestCase(TransactionTestCase):
                     "VALUES (%s, %s, %s)",
                     ("Archibald", "Haddock", ""),
                 )
-                result = await cursor.fetchmany(size=5)
                 await cursor.aexecute("SELECT * FROM transactions_reporter")
+                result = await cursor.afetchmany(size=5)
                 assert len(result) == 1
                 assert result[0][1:] == ("Archibald", "Haddock", "")
 

@@ -173,6 +173,15 @@ class AsyncCursorWrapper(CursorWrapper):
             sql, param_list, many=True, executor=self._aexecutemany
         )
 
+    async def afetchone(self, *args, **kwargs):
+        return await self.cursor.fetchone(*args, **kwargs)
+
+    async def afetchmany(self, *args, **kwargs):
+        return await self.cursor.fetchmany(*args, **kwargs)
+
+    async def afetchall(self, *args, **kwargs):
+        return await self.cursor.fetchall(*args, **kwargs)
+
     async def __aenter__(self):
         return self
 

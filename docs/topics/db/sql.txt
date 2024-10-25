@@ -421,7 +421,9 @@ Async cursors provide the following methods:
 
 * ``.aexecute()``
 * ``.aexecutemany()``
-
+* ``.afetchone()``
+* ``.afetchmany()``
+* ``.afetchall()``
 
 Calling stored procedures
 ~~~~~~~~~~~~~~~~~~~~~~~~~
