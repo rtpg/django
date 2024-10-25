@@ -20,6 +20,11 @@ from django.db.transaction import TransactionManagementError
 from django.db.utils import DatabaseErrorWrapper, ProgrammingError
 from django.utils.asyncio import async_unsafe
 from django.utils.functional import cached_property
+from django.utils.codegen import (
+    from_codegen,
+    generate_unasynced_codegen,
+    ASYNC_TRUTH_MARKER,
+)
 
 NO_DB_ALIAS = "__no_db__"
 RAN_DB_VERSION_CHECK = set()
@@ -249,6 +254,8 @@ class BaseDatabaseWrapper:
             "method"
         )
 
+    @from_codegen
+    @async_unsafe
     def init_connection_state(self):
         """Initialize the database connection settings."""
         global RAN_DB_VERSION_CHECK
@@ -256,6 +263,7 @@ class BaseDatabaseWrapper:
             self.check_database_version_supported()
             RAN_DB_VERSION_CHECK.add(self.alias)
 
+    @generate_unasynced_codegen
     async def ainit_connection_state(self):
         """Initialize the database connection settings."""
         global RAN_DB_VERSION_CHECK
@@ -294,6 +302,7 @@ class BaseDatabaseWrapper:
         # New connections are healthy.
         self.health_check_done = True
 
+    @from_codegen
     @async_unsafe
     def connect(self):
         """Connect to the database. Assume that the connection is closed."""
@@ -308,12 +317,17 @@ class BaseDatabaseWrapper:
 
         self.run_on_commit = []
 
+    @generate_unasynced_codegen
     async def aconnect(self):
         """Connect to the database. Assume that the connection is closed."""
         # Check for invalid configurations.
         self._pre_connect()
-        # Establish the connection
-        conn_params = self.get_connection_params(for_async=True)
+        if ASYNC_TRUTH_MARKER:
+            # Establish the connection
+            conn_params = self.get_connection_params(for_async=True)
+        else:
+            # Establish the connection
+            conn_params = self.get_connection_params()
         self.aconnection = await self.aget_new_connection(conn_params)
         await self.aset_autocommit(self.settings_dict["AUTOCOMMIT"])
         await self.ainit_connection_state()
@@ -328,6 +342,7 @@ class BaseDatabaseWrapper:
                 % self.alias
             )
 
+    @from_codegen
     @async_unsafe
     def ensure_connection(self):
         """Guarantee that a connection to the database is established."""
@@ -339,6 +354,7 @@ class BaseDatabaseWrapper:
             with self.wrap_database_errors:
                 self.connect()
 
+    @generate_unasynced_codegen
     async def aensure_connection(self):
         """Guarantee that a connection to the database is established."""
         if self.aconnection is None:
@@ -383,31 +399,40 @@ class BaseDatabaseWrapper:
     def _acursor(self, name=None):
         return utils.AsyncCursorCtx(self, name)
 
+    @from_codegen
+    @async_unsafe
     def _commit(self):
         if self.connection is not None:
             with debug_transaction(self, "COMMIT"), self.wrap_database_errors:
                 return self.connection.commit()
 
+    @generate_unasynced_codegen
     async def _acommit(self):
         if self.aconnection is not None:
             with debug_transaction(self, "COMMIT"), self.wrap_database_errors:
                 return await self.aconnection.commit()
 
+    @from_codegen
+    @async_unsafe
     def _rollback(self):
         if self.connection is not None:
             with debug_transaction(self, "ROLLBACK"), self.wrap_database_errors:
                 return self.connection.rollback()
 
+    @generate_unasynced_codegen
     async def _arollback(self):
         if self.aconnection is not None:
             with debug_transaction(self, "ROLLBACK"), self.wrap_database_errors:
                 return await self.aconnection.rollback()
 
+    @from_codegen
+    @async_unsafe
     def _close(self):
         if self.connection is not None:
             with self.wrap_database_errors:
                 return self.connection.close()
 
+    @generate_unasynced_codegen
     async def _aclose(self):
         if self.aconnection is not None:
             with self.wrap_database_errors:
@@ -434,6 +459,18 @@ class BaseDatabaseWrapper:
         self.errors_occurred = False
         self.run_commit_hooks_on_set_autocommit_on = True
 
+    @from_codegen
+    @async_unsafe
+    def commit(self):
+        """Commit a transaction and reset the dirty flag."""
+        self.validate_thread_sharing()
+        self.validate_no_atomic_block()
+        self._commit()
+        # A successful commit means that the database connection works.
+        self.errors_occurred = False
+        self.run_commit_hooks_on_set_autocommit_on = True
+
+    @generate_unasynced_codegen
     async def acommit(self):
         """Commit a transaction and reset the dirty flag."""
         self.validate_thread_sharing()
@@ -454,6 +491,19 @@ class BaseDatabaseWrapper:
         self.needs_rollback = False
         self.run_on_commit = []
 
+    @from_codegen
+    @async_unsafe
+    def rollback(self):
+        """Roll back a transaction and reset the dirty flag."""
+        self.validate_thread_sharing()
+        self.validate_no_atomic_block()
+        self._rollback()
+        # A successful rollback means that the database connection works.
+        self.errors_occurred = False
+        self.needs_rollback = False
+        self.run_on_commit = []
+
+    @generate_unasynced_codegen
     async def arollback(self):
         """Roll back a transaction and reset the dirty flag."""
         self.validate_thread_sharing()
@@ -484,6 +534,28 @@ class BaseDatabaseWrapper:
             else:
                 self.connection = None
 
+    @from_codegen
+    @async_unsafe
+    def close(self):
+        """Close the connection to the database."""
+        self.validate_thread_sharing()
+        self.run_on_commit = []
+
+        # Don't call validate_no_atomic_block() to avoid making it difficult
+        # to get rid of a connection in an invalid state. The next connect()
+        # will reset the transaction state anyway.
+        if self.closed_in_transaction or self.connection is None:
+            return
+        try:
+            self._close()
+        finally:
+            if self.in_atomic_block:
+                self.closed_in_transaction = True
+                self.needs_rollback = True
+            else:
+                self.connection = None
+
+    @generate_unasynced_codegen
     async def aclose(self):
         """Close the connection to the database."""
         self.validate_thread_sharing()
