@@ -155,7 +155,7 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
         return False
 
     generate_unasync_pattern = m.Call(
-        func=m.Name(value="generate_unasynced_codegen"),
+        func=m.Name(value="generate_unasynced"),
     )
 
     generated_keyword_pattern = m.Arg(
@@ -188,7 +188,7 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
                     async_unsafe = True
                 else:
                     raise ValueError(
-                        "generate_unasynced_codegen only supports 0 or 1 arguments"
+                        "generate_unasynced only supports 0 or 1 arguments"
                     )
         return DecoratorInfo(from_codegen, unasync, async_unsafe)
 
