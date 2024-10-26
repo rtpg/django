@@ -1,3 +1,7 @@
+def _identity(f):
+    return f
+
+
 def from_codegen(f):
     """
     This indicates that the function was gotten from codegen, and
@@ -6,9 +10,11 @@ def from_codegen(f):
     return f
 
 
-def generate_unasynced_codegen(f):
+def generate_unasynced_codegen(async_unsafe=False):
     """
     This indicates we should unasync this function/method
+
+    async_unsafe indicates whether to add the async_unsafe decorator
     """
     return f
 

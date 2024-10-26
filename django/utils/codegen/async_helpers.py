@@ -1,3 +1,4 @@
+from collections import namedtuple
 import libcst as cst
 from libcst import FunctionDef, ClassDef, Name, Decorator
 from libcst.helpers import get_full_name_for_node
@@ -7,8 +8,12 @@ from ast import literal_eval
 from typing import Union
 
 import libcst as cst
+import libcst.matchers as m
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 from libcst.codemod.visitors import AddImportsVisitor
+
+
+DecoratorInfo = namedtuple("DecoratorInfo", ["from_codegen", "unasync", "async_unsafe"])
 
 
 class UnasyncifyMethod(cst.CSTTransformer):
@@ -123,19 +128,22 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
             and method_name == "ainit_connection_state"
         )
 
-    def label_as_codegen(self, node: FunctionDef) -> FunctionDef:
+    def label_as_codegen(self, node: FunctionDef, async_unsafe: bool) -> FunctionDef:
+
         from_codegen_marker = Decorator(decorator=Name("from_codegen"))
-        async_unsafe_marker = Decorator(decorator=Name("async_unsafe"))
         AddImportsVisitor.add_needed_import(
             self.context, "django.utils.codegen", "from_codegen"
         )
-        AddImportsVisitor.add_needed_import(
-            self.context, "django.utils.asyncio", "async_unsafe"
-        )
+
+        decorators_to_add = [from_codegen_marker]
+        if async_unsafe:
+            async_unsafe_marker = Decorator(decorator=Name("async_unsafe"))
+            AddImportsVisitor.add_needed_import(
+                self.context, "django.utils.asyncio", "async_unsafe"
+            )
+            decorators_to_add.append(async_unsafe_marker)
         # we remove generate_unasynced_codegen
-        return node.with_changes(
-            decorators=[from_codegen_marker, async_unsafe_marker, *node.decorators[1:]]
-        )
+        return node.with_changes(decorators=[*decorators_to_add, *node.decorators[1:]])
 
     def codegenned_func(self, node: FunctionDef) -> bool:
         for decorator in node.decorators:
@@ -145,6 +153,44 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
             ):
                 return True
         return False
+
+    generate_unasync_pattern = m.Call(
+        func=m.Name(value="generate_unasynced_codegen"),
+    )
+
+    generated_keyword_pattern = m.Arg(
+        keyword=m.Name(value="async_unsafe"),
+        value=m.Name(value="True"),
+    )
+
+    def decorator_info(self, node: FunctionDef) -> DecoratorInfo:
+        from_codegen = False
+        unasync = False
+        async_unsafe = False
+
+        # we only consider the top decorator, and will copy everything else
+        if node.decorators:
+            decorator = node.decorators[0]
+            if isinstance(decorator.decorator, cst.Name):
+                if decorator.decorator.value == "from_codegen":
+                    from_codegen = True
+            elif m.matches(decorator.decorator, self.generate_unasync_pattern):
+                unasync = True
+                args = decorator.decorator.args
+                if len(args) == 0:
+                    async_unsafe = False
+                elif len(args) == 1:
+                    # assert that it's async_unsafe, our only supported
+                    # keyword for now
+                    assert m.matches(
+                        args[0], self.generated_keyword_pattern
+                    ), f"We only support async_unsafe=True as a keyword argument, got {args}"
+                    async_unsafe = True
+                else:
+                    raise ValueError(
+                        "generate_unasynced_codegen only supports 0 or 1 arguments"
+                    )
+        return DecoratorInfo(from_codegen, unasync, async_unsafe)
 
     def decorator_names(self, node: FunctionDef) -> list[str]:
         # get the names of the decorators on this function
@@ -156,13 +202,13 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
         ]
 
     def leave_FunctionDef(self, original_node: FunctionDef, updated_node: FunctionDef):
-        decorators = self.decorator_names(updated_node)
+        decorator_info = self.decorator_info(updated_node)
         # if we are looking at something that's already codegen, drop it
         # (it will get regenerated)
-        if decorators and decorators[0] == "from_codegen":
+        if decorator_info.from_codegen:
             return cst.RemovalSentinel.REMOVE
 
-        if decorators and decorators[0] == "generate_unasynced_codegen":
+        if decorator_info.unasync:
             method_name = get_full_name_for_node(updated_node.name)
             if method_name[0] != "a" and method_name[:2] != "_a":
                 raise ValueError(
@@ -177,7 +223,9 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
                 name=Name(new_name),
                 asynchronous=None,
             )
-            unasynced_func = self.label_as_codegen(unasynced_func)
+            unasynced_func = self.label_as_codegen(
+                unasynced_func, async_unsafe=decorator_info.async_unsafe
+            )
             unasynced_func = unasynced_func.visit(UnasyncifyMethod())
 
             # while here the async version is the canonical version, we place

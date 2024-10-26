@@ -255,7 +255,6 @@ class BaseDatabaseWrapper:
         )
 
     @from_codegen
-    @async_unsafe
     def init_connection_state(self):
         """Initialize the database connection settings."""
         global RAN_DB_VERSION_CHECK
@@ -263,7 +262,7 @@ class BaseDatabaseWrapper:
             self.check_database_version_supported()
             RAN_DB_VERSION_CHECK.add(self.alias)
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen()
     async def ainit_connection_state(self):
         """Initialize the database connection settings."""
         global RAN_DB_VERSION_CHECK
@@ -317,7 +316,7 @@ class BaseDatabaseWrapper:
 
         self.run_on_commit = []
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen(async_unsafe=True)
     async def aconnect(self):
         """Connect to the database. Assume that the connection is closed."""
         # Check for invalid configurations.
@@ -354,7 +353,7 @@ class BaseDatabaseWrapper:
             with self.wrap_database_errors:
                 self.connect()
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen(async_unsafe=True)
     async def aensure_connection(self):
         """Guarantee that a connection to the database is established."""
         if self.aconnection is None:
@@ -400,39 +399,36 @@ class BaseDatabaseWrapper:
         return utils.AsyncCursorCtx(self, name)
 
     @from_codegen
-    @async_unsafe
     def _commit(self):
         if self.connection is not None:
             with debug_transaction(self, "COMMIT"), self.wrap_database_errors:
                 return self.connection.commit()
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen()
     async def _acommit(self):
         if self.aconnection is not None:
             with debug_transaction(self, "COMMIT"), self.wrap_database_errors:
                 return await self.aconnection.commit()
 
     @from_codegen
-    @async_unsafe
     def _rollback(self):
         if self.connection is not None:
             with debug_transaction(self, "ROLLBACK"), self.wrap_database_errors:
                 return self.connection.rollback()
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen()
     async def _arollback(self):
         if self.aconnection is not None:
             with debug_transaction(self, "ROLLBACK"), self.wrap_database_errors:
                 return await self.aconnection.rollback()
 
     @from_codegen
-    @async_unsafe
     def _close(self):
         if self.connection is not None:
             with self.wrap_database_errors:
                 return self.connection.close()
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen()
     async def _aclose(self):
         if self.aconnection is not None:
             with self.wrap_database_errors:
@@ -449,16 +445,6 @@ class BaseDatabaseWrapper:
         """Create an async cursor, opening a connection if necessary."""
         return self._acursor()
 
-    @async_unsafe
-    def commit(self):
-        """Commit a transaction and reset the dirty flag."""
-        self.validate_thread_sharing()
-        self.validate_no_atomic_block()
-        self._commit()
-        # A successful commit means that the database connection works.
-        self.errors_occurred = False
-        self.run_commit_hooks_on_set_autocommit_on = True
-
     @from_codegen
     @async_unsafe
     def commit(self):
@@ -470,7 +456,7 @@ class BaseDatabaseWrapper:
         self.errors_occurred = False
         self.run_commit_hooks_on_set_autocommit_on = True
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen(async_unsafe=True)
     async def acommit(self):
         """Commit a transaction and reset the dirty flag."""
         self.validate_thread_sharing()
@@ -480,17 +466,6 @@ class BaseDatabaseWrapper:
         self.errors_occurred = False
         self.run_commit_hooks_on_set_autocommit_on = True
 
-    @async_unsafe
-    def rollback(self):
-        """Roll back a transaction and reset the dirty flag."""
-        self.validate_thread_sharing()
-        self.validate_no_atomic_block()
-        self._rollback()
-        # A successful rollback means that the database connection works.
-        self.errors_occurred = False
-        self.needs_rollback = False
-        self.run_on_commit = []
-
     @from_codegen
     @async_unsafe
     def rollback(self):
@@ -503,7 +478,7 @@ class BaseDatabaseWrapper:
         self.needs_rollback = False
         self.run_on_commit = []
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen(async_unsafe=True)
     async def arollback(self):
         """Roll back a transaction and reset the dirty flag."""
         self.validate_thread_sharing()
@@ -514,26 +489,6 @@ class BaseDatabaseWrapper:
         self.needs_rollback = False
         self.run_on_commit = []
 
-    @async_unsafe
-    def close(self):
-        """Close the connection to the database."""
-        self.validate_thread_sharing()
-        self.run_on_commit = []
-
-        # Don't call validate_no_atomic_block() to avoid making it difficult
-        # to get rid of a connection in an invalid state. The next connect()
-        # will reset the transaction state anyway.
-        if self.closed_in_transaction or self.connection is None:
-            return
-        try:
-            self._close()
-        finally:
-            if self.in_atomic_block:
-                self.closed_in_transaction = True
-                self.needs_rollback = True
-            else:
-                self.connection = None
-
     @from_codegen
     @async_unsafe
     def close(self):
@@ -555,7 +510,7 @@ class BaseDatabaseWrapper:
             else:
                 self.connection = None
 
-    @generate_unasynced_codegen
+    @generate_unasynced_codegen(async_unsafe=True)
     async def aclose(self):
         """Close the connection to the database."""
         self.validate_thread_sharing()
