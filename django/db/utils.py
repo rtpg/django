@@ -14,7 +14,6 @@ from django.utils.module_loading import import_string
 
 DEFAULT_DB_ALIAS = "default"
 DJANGO_VERSION_PICKLE_KEY = "_django_version"
-NO_VALUE = object()
 
 
 class Error(Exception):
