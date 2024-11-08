@@ -18,6 +18,7 @@ from django.db import (
     NotSupportedError,
     connections,
     router,
+    # should_use_sync_fallback,
     transaction,
 )
 from django.db.models import AutoField, DateField, DateTimeField, Field, sql
@@ -26,7 +27,7 @@ from django.db.models.deletion import Collector
 from django.db.models.expressions import Case, F, Value, When
 from django.db.models.functions import Cast, Trunc
 from django.db.models.query_utils import FilteredRelation, Q
-from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE, ROW_COUNT
+from django.db.models.sql.constants import ROW_COUNT, GET_ITERATOR_CHUNK_SIZE
 from django.db.models.utils import (
     AltersData,
     create_namedtuple_class,
@@ -50,11 +51,11 @@ class BaseIterable:
         self.chunked_fetch = chunked_fetch
         self.chunk_size = chunk_size
 
-    async def _async_generator(self):
+    async def _sync_to_async_generator(self):
         # Generators don't actually start running until the first time you call
         # next() on them, so make the generator object in the async thread and
         # then repeatedly dispatch to it in a sync thread.
-        sync_generator = self.__iter__()
+        sync_generator = await sync_to_async(self.__iter__)()
 
         def next_slice(gen):
             return list(islice(gen, self.chunk_size))
@@ -66,6 +67,8 @@ class BaseIterable:
             if len(chunk) < self.chunk_size:
                 break
 
+    _async_generator = _sync_to_async_generator
+
     # __aiter__() is a *synchronous* method that has to then return an
     # *asynchronous* iterator/generator. Thus, nest an async generator inside
     # it.
@@ -75,13 +78,29 @@ class BaseIterable:
     # be added to each Iterable subclass, but that needs some work in the
     # Compiler first.
     def __aiter__(self):
-        return self._async_generator()
+        # not clear to me if we need this fallback, to investigate
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return self._sync_to_async_generator()
+        else:
+            return self._agenerator()
+
+    def __iter__(self):
+        return self._generator()
+
+    def _generator(self):
+        raise NotImplementedError()
+
+    def _agenerator(self):
+        raise NotImeplementedError()
 
 
 class ModelIterable(BaseIterable):
     """Iterable that yields a model instance for each row."""
 
     def __iter__(self):
+        return self._generator()
+
+    def _generator(self):
         queryset = self.queryset
         db = queryset.db
         compiler = queryset.query.get_compiler(using=db)
@@ -361,9 +380,12 @@ class QuerySet(AltersData):
             data[-1] = "...(remaining elements truncated)..."
         return "<%s %r>" % (self.__class__.__name__, data)
 
-    def __len__(self):
+    def _fetch_then_len(self):
         self._fetch_all()
         return len(self._result_cache)
+
+    def __len__(self):
+        return self._fetch_then_len()
 
     def __iter__(self):
         """
@@ -387,7 +409,7 @@ class QuerySet(AltersData):
         # Remember, __aiter__ itself is synchronous, it's the thing it returns
         # that is async!
         async def generator():
-            await sync_to_async(self._fetch_all)()
+            await self._afetch_all()
             for item in self._result_cache:
                 yield item
 
@@ -625,7 +647,7 @@ class QuerySet(AltersData):
         ):
             limit = MAX_GET_RESULTS
             clone.query.set_limits(high=limit)
-        num = len(clone)
+        num = clone._fetch_then_len()
         if num == 1:
             return clone._result_cache[0]
         if not num:
@@ -1250,7 +1272,7 @@ class QuerySet(AltersData):
 
         # Clear any annotations so that they won't be present in subqueries.
         query.annotations = {}
-        with transaction.mark_for_rollback_on_error(using=self.db):
+        with transaction.amark_for_rollback_on_error(using=self.db):
             rows = query.get_compiler(self.db).execute_sql(ROW_COUNT)
         self._result_cache = None
         return rows
@@ -1926,7 +1948,7 @@ class QuerySet(AltersData):
 
     def _fetch_all(self):
         if self._result_cache is None:
-            self._result_cache = list(self._iterable_class(self))
+            self._result_cache = [elt for elt in self._iterable_class(self)]
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
 
@@ -2115,6 +2137,10 @@ class RawQuerySet:
             self._result_cache = list(self.iterator())
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
+
+    def _fetch_then_len(self):
+        self._fetch_all()
+        return len(self._result_cache)
 
     def __len__(self):
         self._fetch_all()

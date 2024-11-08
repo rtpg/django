@@ -3,6 +3,7 @@ import json
 import re
 from functools import partial
 from itertools import chain
+from typing import AsyncGenerator
 
 from django.core.exceptions import EmptyResultSet, FieldError, FullResultSet
 from django.db import DatabaseError, NotSupportedError
@@ -13,8 +14,8 @@ from django.db.models.functions import Cast, Random
 from django.db.models.lookups import Lookup
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (
-    CURSOR,
     GET_ITERATOR_CHUNK_SIZE,
+    CURSOR,
     MULTI,
     NO_RESULTS,
     ORDER_DIR,
@@ -27,6 +28,7 @@ from django.db.transaction import TransactionManagementError
 from django.utils.functional import cached_property
 from django.utils.hashable import make_hashable
 from django.utils.regex_helper import _lazy_re_compile
+from django.utils.codegen import from_codegen, generate_unasynced, ASYNC_TRUTH_MARKER
 
 
 class PositionRef(Ref):
@@ -1572,6 +1574,12 @@ class SQLCompiler:
             results = self.execute_sql(
                 MULTI, chunked_fetch=chunked_fetch, chunk_size=chunk_size
             )
+        else:
+            # XXX wrong
+            # this is forcing evaluation of athing way to early
+            # instead of being an actual iterable
+            if isinstance(results, AsyncGenerator):
+                results = [r for r in results]
         fields = [s[0] for s in self.select[0 : self.col_count]]
         converters = self.get_converters(fields)
         rows = chain.from_iterable(results)
@@ -1619,6 +1627,7 @@ class SQLCompiler:
             cursor = self.connection.chunked_cursor()
         else:
             cursor = self.connection.cursor()
+
         try:
             cursor.execute(sql, params)
         except Exception:
@@ -1631,10 +1640,9 @@ class SQLCompiler:
                 return cursor.rowcount
             finally:
                 cursor.close()
-        if result_type == CURSOR:
-            # Give the caller the cursor to process and close.
+        elif result_type == CURSOR:
             return cursor
-        if result_type == SINGLE:
+        elif result_type == SINGLE:
             try:
                 val = cursor.fetchone()
                 if val:
@@ -1643,23 +1651,29 @@ class SQLCompiler:
             finally:
                 # done with the cursor
                 cursor.close()
-        if result_type == NO_RESULTS:
+        elif result_type == NO_RESULTS:
             cursor.close()
             return
-
-        result = cursor_iter(
-            cursor,
-            self.connection.features.empty_fetchmany_value,
-            self.col_count if self.has_extra_select else None,
-            chunk_size,
-        )
-        if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
-            # If we are using non-chunked reads, we return the same data
-            # structure as normally, but ensure it is all read into memory
-            # before going any further. Use chunked_fetch if requested,
-            # unless the database doesn't support it.
-            return list(result)
-        return result
+        elif result_type == ROW_COUNT:
+            try:
+                return cursor.rowcount
+            finally:
+                cursor.close()
+        else:
+            assert result_type == MULTI
+            result = cursor_iter(
+                cursor,
+                self.connection.features.empty_fetchmany_value,
+                self.col_count if self.has_extra_select else None,
+                chunk_size,
+            )
+            if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
+                # If we are using non-chunked reads, we return the same data
+                # structure as normally, but ensure it is all read into memory
+                # before going any further. Use chunked_fetch if requested,
+                # unless the database doesn't support it.
+                return [elt for elt in result]
+            return result
 
     def as_subquery_condition(self, alias, columns, compiler):
         qn = compiler.quote_name_unless_alias
@@ -1923,6 +1937,7 @@ class SQLInsertCompiler(SQLCompiler):
                         ),
                     )
                 ]
+
             else:
                 # Backend doesn't support returning fields and no auto-field
                 # that can be retrieved from `last_insert_id` was specified.
@@ -1994,6 +2009,7 @@ class SQLDeleteCompiler(SQLCompiler):
 
 
 class SQLUpdateCompiler(SQLCompiler):
+
     def as_sql(self):
         """
         Create the SQL for this query. Return the SQL string and list of
@@ -2079,7 +2095,7 @@ class SQLUpdateCompiler(SQLCompiler):
                 is_empty = False
         return row_count
 
-    def pre_sql_setup(self):
+    def pre_sql_setup(self, with_col_aliases=False):
         """
         If the update depends on results from other tables, munge the "where"
         conditions to match the format required for (portable) SQL updates.
@@ -2116,7 +2132,7 @@ class SQLUpdateCompiler(SQLCompiler):
                 related_ids_index.append((related, len(fields)))
                 fields.append(related._meta.pk.name)
         query.add_fields(fields)
-        super().pre_sql_setup()
+        super().pre_sql_setup(with_col_aliases=with_col_aliases)
 
         is_composite_pk = meta.is_composite_pk
         must_pre_select = (
@@ -2146,6 +2162,7 @@ class SQLUpdateCompiler(SQLCompiler):
 
 
 class SQLAggregateCompiler(SQLCompiler):
+
     def as_sql(self):
         """
         Create the SQL for this query. Return the SQL string and list of
@@ -2176,7 +2193,10 @@ def cursor_iter(cursor, sentinel, col_count, itersize):
     done.
     """
     try:
-        for rows in iter((lambda: cursor.fetchmany(itersize)), sentinel):
+        while True:
+            rows = cursor.fetchmany(itersize)
+            if rows == sentinel:
+                break
             yield rows if col_count is None else [r[:col_count] for r in rows]
     finally:
         cursor.close()

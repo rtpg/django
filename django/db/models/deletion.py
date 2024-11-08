@@ -113,6 +113,12 @@ class Collector:
         # parent.
         self.dependencies = defaultdict(set)  # {model: {models}}
 
+    def bool(self, elts):
+        if hasattr(elts, "_afetch_then_len"):
+            return bool(elts._fetch_then_len())
+        else:
+            return bool(elts)
+
     def add(self, objs, source=None, nullable=False, reverse_dependency=False):
         """
         Add 'objs' to the collection of objects to be deleted.  If the call is
@@ -121,7 +127,8 @@ class Collector:
 
         Return a list of all objects that were not already collected.
         """
-        if not objs:
+        # XXX incorrect hack
+        if not self.bool(objs):
             return []
         new_objs = []
         model = objs[0].__class__

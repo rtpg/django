@@ -192,16 +192,8 @@ class BaseDatabaseWrapper:
         Raise an error if the database version isn't supported by this
         version of Django.
         """
-        if (
-            self.features.minimum_database_version is not None
-            and self.get_database_version() < self.features.minimum_database_version
-        ):
-            db_version = ".".join(map(str, self.get_database_version()))
-            min_db_version = ".".join(map(str, self.features.minimum_database_version))
-            raise NotSupportedError(
-                f"{self.display_name} {min_db_version} or later is required "
-                f"(found {db_version})."
-            )
+        db_version = self.get_database_version()
+        self._validate_database_version_supported(db_version)
 
     # ##### Backend-specific methods for creating connections and cursors #####
 
@@ -252,6 +244,7 @@ class BaseDatabaseWrapper:
         self.errors_occurred = False
         # New connections are healthy.
         self.health_check_done = True
+
         # Establish the connection
         conn_params = self.get_connection_params()
         self.connection = self.get_new_connection(conn_params)

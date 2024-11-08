@@ -11,7 +11,54 @@ from django.apps import apps
 from django.db import NotSupportedError
 from django.utils.dateparse import parse_time
 
+from asgiref.local import Local
+
 logger = logging.getLogger("django.db.backends")
+
+# XXX experimentation
+sync_cursor_ops_local = Local()
+sync_cursor_ops_local.value = False
+
+
+# XXX experimentation
+class sync_cursor_ops_blocked:
+    @classmethod
+    def get(cls):
+        # This is extremely wrong! Maybe. To think about
+        try:
+            return sync_cursor_ops_local.value
+        except AttributeError:
+            # if it's not set... it's not True
+            sync_cursor_ops_local.value = False
+            return False
+
+    @classmethod
+    def set(cls, v):
+        sync_cursor_ops_local.value = v
+
+
+# XXX experimentation
+@contextmanager
+def block_sync_ops():
+    old_val = sync_cursor_ops_blocked.get()
+    sync_cursor_ops_blocked.set(True)
+    try:
+        print("Started blocking sync ops.")
+        yield
+    finally:
+        sync_cursor_ops_blocked.set(old_val)
+        print("Stopped blocking sync ops.")
+
+
+# XXX experimentation
+@contextmanager
+def unblock_sync_ops():
+    old_val = sync_cursor_ops_blocked.get()
+    sync_cursor_ops_blocked.set(False)
+    try:
+        yield
+    finally:
+        sync_cursor_ops_blocked.set(old_val)
 
 
 class CursorWrapper:
@@ -21,6 +68,10 @@ class CursorWrapper:
 
     WRAP_ERROR_ATTRS = frozenset(["fetchone", "fetchmany", "fetchall", "nextset"])
 
+    # XXX experimentation
+    SYNC_BLOCK = {"close"}
+    # XXX experimentation
+    SAFE_LIST = set()
     APPS_NOT_READY_WARNING_MSG = (
         "Accessing the database during app initialization is discouraged. To fix this "
         "warning, avoid executing queries in AppConfig.ready() or when your app "
@@ -28,6 +79,18 @@ class CursorWrapper:
     )
 
     def __getattr__(self, attr):
+        # XXX experimentation
+        # (the point here is being able to focus on a chunk of code in a specific
+        #  way to identify if something is unintentionally falling back to sync ops)
+        if sync_cursor_ops_blocked.get():
+            if attr in CursorWrapper.WRAP_ERROR_ATTRS:
+                raise ValueError("Sync operations blocked!")
+            elif attr in CursorWrapper.SYNC_BLOCK:
+                raise ValueError("Sync operations blocked!")
+            elif attr in CursorWrapper.SAFE_LIST:
+                pass
+            else:
+                print(f"CursorWrapper.{attr} accessed")
         cursor_attr = getattr(self.cursor, attr)
         if attr in CursorWrapper.WRAP_ERROR_ATTRS:
             return self.db.wrap_database_errors(cursor_attr)
@@ -176,18 +239,21 @@ def debug_transaction(connection, sql):
                 {
                     "sql": "%s" % sql,
                     "time": "%.3f" % duration,
+                    "async": connection.supports_async,
                 }
             )
             logger.debug(
-                "(%.3f) %s; args=%s; alias=%s",
+                "(%.3f) %s; args=%s; alias=%s; async=%s",
                 duration,
                 sql,
                 None,
                 connection.alias,
+                connection.supports_async,
                 extra={
                     "duration": duration,
                     "sql": sql,
                     "alias": connection.alias,
+                    "async": connection.supports_async,
                 },
             )
 
