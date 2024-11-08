@@ -403,6 +403,8 @@ is equivalent to::
     finally:
         c.close()
 
+.. async-connection-cursor:
+
 Async Connections and cursors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
