@@ -429,7 +429,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         if self.apool:
             # If nothing else has opened the pool, open it now.
             await self.apool.open()
-            connection = self.apool.getconn()
+            connection = await self.apool.getconn()
         else:
             connection = await self.Database.AsyncConnection.connect(**conn_params)
         if set_isolation_level:
@@ -536,7 +536,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
                     # Ensure the correct pool is returned. This is a workaround
                     # for tests so a pool can be changed on setting changes
                     # (e.g. USE_TZ, TIME_ZONE).
-                    self.aconnection._pool.putconn(self.aconnection)
+                    await self.aconnection._pool.putconn(self.aconnection)
                     # Connection can no longer be used.
                     self.aconnection = None
                 else:

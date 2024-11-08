@@ -12,3 +12,12 @@ class AsyncDatabaseWrapperTests(SimpleTestCase):
                 await cursor.execute("SELECT 1")
                 result = (await cursor.fetchone())[0]
             self.assertEqual(result, 1)
+
+    @unittest.skipUnless(connection.supports_async is True, "Async DB test")
+    @unittest.skipUnless(connection.pool is not None, "Connection pooling test")
+    async def test_async_cursor_pool(self):
+        async with new_connection() as conn:
+            async with conn.acursor() as cursor:
+                await cursor.execute("SELECT 1")
+                result = (await cursor.fetchone())[0]
+            self.assertEqual(result, 1)
