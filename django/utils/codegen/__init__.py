@@ -10,13 +10,17 @@ def from_codegen(f):
     return f
 
 
-def generate_unasynced_codegen(async_unsafe=False):
+def generate_unasynced(async_unsafe=False):
     """
     This indicates we should unasync this function/method
 
     async_unsafe indicates whether to add the async_unsafe decorator
     """
-    return f
+
+    def wrapper(f):
+        return f
+
+    return wrapper
 
 
 # this marker gets replaced by False when unasyncifying a function
