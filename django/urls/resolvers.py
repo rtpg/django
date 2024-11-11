@@ -708,7 +708,17 @@ class URLResolver:
     @cached_property
     def urlconf_module(self):
         if isinstance(self.urlconf_name, str):
-            return import_module(self.urlconf_name)
+            try:
+                return import_module(self.urlconf_name)
+            except ImportError:
+                if getattr(settings, "ROOT_URLCONF", None) == self.urlconf_name:
+                    raise ImproperlyConfigured(
+                        f"Failed to import '{self.urlconf_name}' as a URL configuration, is your ROOT_URLCONF misconfigured?"
+                    )
+                else:
+                    raise ImproperlyConfigured(
+                        f"Failed to load '{self.urlconf_name}' as a URL configuration."
+                    )
         else:
             return self.urlconf_name
 

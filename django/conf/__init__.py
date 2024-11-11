@@ -163,7 +163,12 @@ class Settings:
         # store the settings module in case someone later cares
         self.SETTINGS_MODULE = settings_module
 
-        mod = importlib.import_module(self.SETTINGS_MODULE)
+        try:
+            mod = importlib.import_module(self.SETTINGS_MODULE)
+        except ImportError:
+            raise ImproperlyConfigured(
+                f"Failed to import '{self.SETTINGS_MODULE}' as Django settings, is your settings path correct?"
+            )
 
         tuple_settings = (
             "ALLOWED_HOSTS",
