@@ -103,6 +103,12 @@ class UnasyncifyMethod(cst.CSTTransformer):
                 return cst.RemovalSentinel.REMOVE
         return updated_node
 
+    def leave_CompFor(self, original_node, updated_node):
+        if updated_node.asynchronous is not None:
+            return updated_node.with_changes(asynchronous=None)
+        else:
+            return updated_node
+
     def leave_For(self, original_node, updated_node):
         if updated_node.asynchronous is not None:
             return updated_node.with_changes(asynchronous=None)
