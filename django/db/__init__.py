@@ -56,6 +56,10 @@ class new_connection:
                 "The database backend does not support asynchronous execution."
             )
 
+        if conn.in_atomic_block:
+            raise NotSupportedError(
+                "Can't open an async connection while inside of a synchronous transaction block"
+            )
         self.force_rollback = False
         if async_connections.empty is True:
             if async_connections._from_testcase is True:
