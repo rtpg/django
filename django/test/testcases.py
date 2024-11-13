@@ -1119,6 +1119,10 @@ class TransactionTestCase(SimpleTestCase):
         * If the class has a 'fixtures' attribute, install those fixtures.
         """
         super()._pre_setup()
+        if not hasattr(cls, "available_apps"):
+            raise Exception(
+                "Please define available_apps in TransactionTestCase and its subclasses."
+            )
         if cls.available_apps is not None:
             apps.set_available_apps(cls.available_apps)
             cls._available_apps_calls_balanced += 1
