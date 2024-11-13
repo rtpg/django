@@ -377,7 +377,7 @@ class BaseDatabaseWrapper:
             wrapped_cursor = self.make_cursor(cursor)
         return wrapped_cursor
 
-    def _aprepare_cursor(self, cursor):
+    def _aprepare_cursor(self, cursor) -> utils.AsyncCursorWrapper:
         """
         Validate the connection is usable and perform database cursor wrapping.
         """
@@ -395,7 +395,7 @@ class BaseDatabaseWrapper:
         with self.wrap_database_errors:
             return self._prepare_cursor(self.create_cursor(name))
 
-    def _acursor(self, name=None):
+    def _acursor(self, name=None) -> utils.AsyncCursorCtx:
         return utils.AsyncCursorCtx(self, name)
 
     @from_codegen
@@ -441,8 +441,10 @@ class BaseDatabaseWrapper:
         """Create a cursor, opening a connection if necessary."""
         return self._cursor()
 
-    def acursor(self):
+    def acursor(self) -> utils.AsyncCursorCtx:
         """Create an async cursor, opening a connection if necessary."""
+        if ASYNC_TRUTH_MARKER:
+            self.validate_no_atomic_block()
         return self._acursor()
 
     @from_codegen

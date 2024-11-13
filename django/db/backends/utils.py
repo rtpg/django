@@ -11,6 +11,11 @@ from django.apps import apps
 from django.db import NotSupportedError
 from django.utils.dateparse import parse_time
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from django.db.backends.base.base import BaseDatabaseWrapper
+
 logger = logging.getLogger("django.db.backends")
 
 
@@ -117,14 +122,16 @@ class CursorWrapper:
 class AsyncCursorCtx:
     """
     Asynchronous context manager to hold an async cursor.
+
+    XXX should this close the cursor as well?
     """
 
-    def __init__(self, db, name=None):
+    def __init__(self, db: "BaseDatabaseWrapper", name=None):
         self.db = db
         self.name = name
         self.wrap_database_errors = self.db.wrap_database_errors
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "AsyncCursorWrapper":
         await self.db.aclose_if_health_check_failed()
         await self.db.aensure_connection()
         self.wrap_database_errors.__enter__()
