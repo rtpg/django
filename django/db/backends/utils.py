@@ -207,6 +207,9 @@ class AsyncCursorWrapper(CursorWrapper):
         except self.db.Database.Error:
             pass
 
+    async def aclose(self):
+        await self.close()
+
 
 class CursorDebugWrapper(CursorWrapper):
     # XXX callproc isn't instrumented at this time.
