@@ -1,6 +1,23 @@
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from .models import SimpleModel
+from django.db import transaction, new_connection
+from asgiref.sync import async_to_sync
+
+
+# XXX should there be a way of catching this
+# class AsyncSyncCominglingTest(TransactionTestCase):
+
+#     available_apps = ["async"]
+
+#     async def change_model_with_async(self, obj):
+#         obj.field = 10
+#         await obj.asave()
+
+#     def test_transaction_async_comingling(self):
+#         with transaction.atomic():
+#             s1 = SimpleModel.objects.create(field=0)
+#             async_to_sync(self.change_model_with_async)(s1)
 
 
 class AsyncModelOperationTest(TestCase):
