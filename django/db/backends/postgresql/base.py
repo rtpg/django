@@ -23,6 +23,8 @@ from django.utils.functional import cached_property
 from django.utils.safestring import SafeString
 from django.utils.version import get_version_tuple
 
+LOG_CREATIONS = False
+
 try:
     try:
         import psycopg as Database
@@ -87,6 +89,51 @@ def _get_varchar_column(data):
     if data["max_length"] is None:
         return "varchar"
     return "varchar(%(max_length)s)" % data
+
+
+class ASCXN(Database.AsyncConnection):
+    def __init__(self, *args, **kwargs):
+        import traceback
+
+        self._creation_stack = traceback.format_stack()
+        if LOG_CREATIONS:
+            print("CREATED ASYNCCONNECTION")
+            print("\n".join(self._creation_stack))
+        super().__init__(*args, **kwargs)
+
+    def __del__(self):
+        if LOG_CREATIONS:
+            print("IN ASCXN.__DEL__")
+            print("CREATION STACK WAS")
+            print("\n".join(self._creation_stack))
+            print("-------------------")
+        super().__del__()
+
+
+class SCXN(Database.Connection):
+    def __init__(self, *args, **kwargs):
+        import traceback
+
+        self._creation_stack = traceback.format_stack()
+        if LOG_CREATIONS:
+            print("CREATED SYNCCONNECTION")
+            print("\n".join(self._creation_stack))
+        super().__init__(*args, **kwargs)
+
+    def close(self):
+        if LOG_CREATIONS:
+            print("IN SCXN.CLOSE")
+            print("\n".join(traceback.format_stack()))
+        super().close()
+
+    def __del__(self):
+        if LOG_CREATIONS:
+            print("IN SCXN.__DEL__")
+            print(f"{self._closed=}")
+            print("CREATION STACK WAS")
+            print("\n".join(self._creation_stack))
+            print("-------------------")
+        super().__del__()
 
 
 class DatabaseWrapper(BaseDatabaseWrapper):
@@ -411,7 +458,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             self.pool.open()
             connection = self.pool.getconn()
         else:
-            connection = self.Database.connect(**conn_params)
+            connection = SCXN.connect(**conn_params)
         if set_isolation_level:
             connection.isolation_level = isolation_level
         if not is_psycopg3:
@@ -431,7 +478,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             await self.apool.open()
             connection = await self.apool.getconn()
         else:
-            connection = await self.Database.AsyncConnection.connect(**conn_params)
+            # connection = await self.Database.AsyncConnection.connect(**conn_params)
+            connection = await ASCXN.connect(**conn_params)
         if set_isolation_level:
             connection.isolation_level = isolation_level
         return connection
