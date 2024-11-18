@@ -1,4 +1,6 @@
+from collections import defaultdict
 from contextlib import ContextDecorator, contextmanager
+import contextvars
 
 from django.db import (
     DEFAULT_DB_ALIAS,
@@ -179,7 +181,25 @@ class Atomic(ContextDecorator):
         self.durable = durable
         self._from_testcase = False
 
+    # tracking how many atomic transactions I have done
+    _atomic_depth_ctx: dict[str, contextvars.ContextVar] = {}
+
+    def atomic_depth_var(self, using):
+        if using is None:
+            using = DEFAULT_DB_ALIAS
+        # XXX race?
+        if using not in self._atomic_depth_ctx:
+            # XXX awkward context var
+            self._atomic_depth_ctx[using] = contextvars.ContextVar(using, default=0)
+        return self._atomic_depth_ctx[using]
+
+    def current_atomic_depth(self, using):
+        return self.atomic_depth_var(using).get()
+
     def __enter__(self):
+
+        current_depth = self.atomic_depth_var(self.using)
+        current_depth.set(current_depth.get() + 1)
         connection = get_connection(self.using)
 
         if (
@@ -222,6 +242,8 @@ class Atomic(ContextDecorator):
             connection.atomic_blocks.append(self)
 
     def __exit__(self, exc_type, exc_value, traceback):
+        current_depth = self.atomic_depth_var(self.using)
+        current_depth.set(current_depth.get() - 1)
         connection = get_connection(self.using)
 
         if connection.in_atomic_block:

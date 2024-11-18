@@ -20,13 +20,19 @@ from asgiref.sync import async_to_sync
 #             async_to_sync(self.change_model_with_async)(s1)
 
 
-class AsyncModelOperationTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.s1 = SimpleModel.objects.create(field=0)
+class AsyncModelOperationTest(TransactionTestCase):
+
+    available_apps = ["async"]
+
+    def setUp(self):
+        super().setUp()
+        self.s1 = SimpleModel.objects.create(field=0)
 
     async def test_asave(self):
         self.s1.field = 10
+        import pdb
+
+        pdb.set_trace()
         await self.s1.asave()
         refetched = await SimpleModel.objects.aget()
         self.assertEqual(refetched.field, 10)

@@ -1,3 +1,4 @@
+import os
 from django.core import signals
 from django.db.utils import (
     DEFAULT_DB_ALIAS,
@@ -46,10 +47,15 @@ class new_connection:
 
     """
 
+    BALANCE = 0
+
     def __init__(self, using=DEFAULT_DB_ALIAS):
         self.using = using
 
     async def __aenter__(self):
+        self.__class__.BALANCE += 1
+        if "QL" in os.environ:
+            print(f"new_connection balance(__aenter__) {self.__class__.BALANCE}")
         conn = connections.create_connection(self.using)
         if conn.supports_async is False:
             raise NotSupportedError(
@@ -75,6 +81,8 @@ class new_connection:
         return self.conn
 
     async def __aexit__(self, exc_type, exc_value, traceback):
+        self.__class__.BALANCE -= 1
+        print(f"new_connection balance (__aexit__) {self.__class__.BALANCE}")
         autocommit = await self.conn.aget_autocommit()
         if autocommit is False:
             if exc_type is None and self.force_rollback is False:

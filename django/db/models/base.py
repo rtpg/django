@@ -918,7 +918,6 @@ class Model(AltersData, metaclass=ModelBase):
             if loaded_fields:
                 update_fields = frozenset(loaded_fields)
 
-        print(5)
         await self.asave_base(
             using=using,
             force_insert=force_insert,
@@ -1047,7 +1046,6 @@ class Model(AltersData, metaclass=ModelBase):
         if cls._meta.proxy:
             cls = cls._meta.concrete_model
         meta = cls._meta
-        print(6)
         if not meta.auto_created:
             pre_save.send(
                 sender=origin,

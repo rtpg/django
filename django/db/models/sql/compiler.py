@@ -1692,10 +1692,12 @@ class SQLCompiler:
                 return
         if ASYNC_TRUTH_MARKER:
             if chunked_fetch:
-                # XX def wrong
+                # XXX def wrong
+                raise ValueError("WRONG")
                 cursor = self.connection.chunked_cursor()
             else:
                 # XXX how to handle aexit here
+                cursor_ctx = self.connection.acursor()
                 cursor = await self.connection.acursor().__aenter__()
         else:
             if chunked_fetch:
@@ -2214,19 +2216,25 @@ class SQLUpdateCompiler(SQLCompiler):
         non-empty query that is executed. Row counts for any subsequent,
         related queries are not available.
         """
-        cursor = await super().aexecute_sql(result_type)
+        print("SQLUpdateCompiler.aexecute_sql START")
         try:
-            rows = cursor.rowcount if cursor else 0
-            is_empty = cursor is None
+            cursor = await super().aexecute_sql(result_type)
+            try:
+                rows = cursor.rowcount if cursor else 0
+                is_empty = cursor is None
+            finally:
+                if cursor:
+                    await cursor.aclose()
+            for query in self.query.get_related_updates():
+                aux_rows = await query.get_compiler(
+                    self.using, raise_on_miss=True
+                ).aexecute_sql(result_type)
+                if is_empty and aux_rows:
+                    rows = aux_rows
+                    is_empty = False
+            return rows
         finally:
-            if cursor:
-                await cursor.aclose()
-        for query in self.query.get_related_updates():
-            aux_rows = await query.get_compiler(self.using).aexecute_sql(result_type)
-            if is_empty and aux_rows:
-                rows = aux_rows
-                is_empty = False
-        return rows
+            print("SQLUpdateCompiler.execute_sql END")
 
     def pre_sql_setup(self):
         """

@@ -13,6 +13,8 @@ import tempfile
 import warnings
 from pathlib import Path
 
+print("HI!!!", file=sys.stderr)
+print("HI!!!", file=sys.stdout)
 try:
     import django
 except ImportError as e:

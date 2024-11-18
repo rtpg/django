@@ -2,6 +2,7 @@ import _thread
 import copy
 import datetime
 import logging
+import os
 import threading
 import time
 import warnings
@@ -28,7 +29,7 @@ from django.utils.codegen import (
 
 NO_DB_ALIAS = "__no_db__"
 RAN_DB_VERSION_CHECK = set()
-LOG_CREATIONS = False
+LOG_CREATIONS = True
 
 logger = logging.getLogger("django.db.backends.base")
 
@@ -60,11 +61,13 @@ class BaseDatabaseWrapper:
     queries_limit = 9000
 
     def __init__(self, settings_dict, alias=DEFAULT_DB_ALIAS):
-        if LOG_CREATIONS:
+        if LOG_CREATIONS and ("QL" in os.environ):
             import traceback
 
             print("CREATED DBWRAPPER FOR ", alias)
-            print("\n".join(traceback.format_stack()))
+            tb = "\n".join(traceback.format_stack())
+            if "connect_db_then_run" not in tb:
+                print(tb)
         # Connection related attributes.
         # The underlying database connection.
         self.connection = None
@@ -336,7 +339,7 @@ class BaseDatabaseWrapper:
         self.aconnection = await self.aget_new_connection(conn_params)
         await self.aset_autocommit(self.settings_dict["AUTOCOMMIT"])
         await self.ainit_connection_state()
-        connection_created.send(sender=self.__class__, connection=self)
+        await connection_created.asend(sender=self.__class__, connection=self)
 
         self.run_on_commit = []
 
@@ -436,6 +439,7 @@ class BaseDatabaseWrapper:
 
     @generate_unasynced()
     async def _aclose(self):
+        print(f"YYY {id(self)} BDW CLOSE")
         if self.aconnection is not None:
             with self.wrap_database_errors:
                 return await self.aconnection.close()
@@ -701,11 +705,13 @@ class BaseDatabaseWrapper:
     def get_autocommit(self):
         """Get the autocommit state."""
         self.ensure_connection()
+        print(f"get_autocommit() <- {self.autocommit}")
         return self.autocommit
 
     async def aget_autocommit(self):
         """Get the autocommit state."""
         await self.aensure_connection()
+        print(f"aget_autocommit() <- {self.autocommit}")
         return self.autocommit
 
     def set_autocommit(
@@ -722,6 +728,7 @@ class BaseDatabaseWrapper:
         explicit BEGIN with SQLite. This option will be ignored for other
         backends.
         """
+        print(f"set_autocommit({autocommit})")
         self.validate_no_atomic_block()
         self.close_if_health_check_failed()
         self.ensure_connection()
@@ -759,6 +766,9 @@ class BaseDatabaseWrapper:
         explicit BEGIN with SQLite. This option will be ignored for other
         backends.
         """
+        print(f"{id(self)}.aset_autocommit({autocommit})")
+        if autocommit is False:
+            raise ValueError("FALSE")
         self.validate_no_atomic_block()
         await self.aclose_if_health_check_failed()
         await self.aensure_connection()

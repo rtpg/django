@@ -366,6 +366,25 @@ def teardown_databases(old_config, verbosity, parallel=0, keepdb=False):
                         verbosity=verbosity,
                         keepdb=keepdb,
                     )
+            import objgraph
+            import pdb
+
+            from django.db.backends.postgresql.base import DatabaseWrapper, ASCXN
+            import gc
+
+            def the_objs(klass):
+                return [obj for obj in gc.get_objects() if try_isinstance(obj, klass)]
+
+            def try_isinstance(a, b):
+                try:
+                    return isinstance(a, b)
+                except:
+                    return False
+
+            active_dbs = [db for db in the_objs(DatabaseWrapper) if db.aconnection]
+            if len(active_dbs):
+                print(active_dbs)
+                pdb.set_trace()
             connection.creation.destroy_test_db(old_name, verbosity, keepdb)
 
 

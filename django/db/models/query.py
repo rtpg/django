@@ -1295,7 +1295,7 @@ class QuerySet(AltersData):
         # Clear any annotations so that they won't be present in subqueries.
         query.annotations = {}
         self._result_cache = None
-        return await query.get_compiler(self.db).aexecute_sql(CURSOR)
+        return await query.aget_compiler(self.db).aexecute_sql(CURSOR)
 
     _update.alters_data = True
     _update.queryset_only = False
@@ -1897,7 +1897,7 @@ class QuerySet(AltersData):
             unique_fields=unique_fields,
         )
         query.insert_values(fields, objs, raw=raw)
-        return await query.get_compiler(using=using).aexecute_sql(returning_fields)
+        return await query.aget_compiler(using=using).aexecute_sql(returning_fields)
 
     _insert.alters_data = True
     _insert.queryset_only = False

@@ -17,7 +17,12 @@ from itertools import chain, count, product
 from string import ascii_uppercase
 
 from django.core.exceptions import FieldDoesNotExist, FieldError
-from django.db import DEFAULT_DB_ALIAS, NotSupportedError, connections
+from django.db import (
+    DEFAULT_DB_ALIAS,
+    NotSupportedError,
+    connections,
+    async_connections,
+)
 from django.db.models.aggregates import Count
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.expressions import (
@@ -355,11 +360,24 @@ class Query(BaseExpression):
         memo[id(self)] = result
         return result
 
-    def get_compiler(self, using=None, connection=None, elide_empty=True):
+    def get_compiler(
+        self, using=None, connection=None, elide_empty=True, raise_on_miss=False
+    ):
         if using is None and connection is None:
             raise ValueError("Need either using or connection")
         if using:
-            connection = connections[using]
+            connection = connections.get_item(using, raise_on_miss=raise_on_miss)
+        return connection.ops.compiler(self.compiler)(
+            self, connection, using, elide_empty
+        )
+
+    def aget_compiler(
+        self, using=None, connection=None, elide_empty=True, raise_on_miss=True
+    ):
+        if using is None and connection is None:
+            raise ValueError("Need either using or connection")
+        if using:
+            connection = async_connections.get_connection(using)
         return connection.ops.compiler(self.compiler)(
             self, connection, using, elide_empty
         )

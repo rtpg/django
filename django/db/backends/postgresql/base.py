@@ -5,7 +5,10 @@ Requires psycopg2 >= 2.8.4 or psycopg >= 3.1.8
 """
 
 import asyncio
+import inspect
+import os
 import threading
+import traceback
 import warnings
 from contextlib import contextmanager
 
@@ -92,21 +95,29 @@ def _get_varchar_column(data):
 
 
 class ASCXN(Database.AsyncConnection):
+    LOG_CREATIONS = True
+    LOG_DELETIONS = True
+
     def __init__(self, *args, **kwargs):
         import traceback
 
         self._creation_stack = traceback.format_stack()
-        if LOG_CREATIONS:
-            print("CREATED ASYNCCONNECTION")
-            print("\n".join(self._creation_stack))
         super().__init__(*args, **kwargs)
+        if self.LOG_CREATIONS and ("QL" in os.environ):
+            print(f"CREATED ASCXN {self}")
+            # print("\n".join(self._creation_stack))
+
+    async def close(self):
+        if self.LOG_DELETIONS and ("QL" in os.environ):
+            print(f"CLOSING ASCXN {self}")
+        await super().close()
 
     def __del__(self):
-        if LOG_CREATIONS:
+        if self.LOG_DELETIONS and ("QL" in os.environ):
             print("IN ASCXN.__DEL__")
-            print("CREATION STACK WAS")
-            print("\n".join(self._creation_stack))
-            print("-------------------")
+            # print("CREATION STACK WAS")
+            # print("\n".join(self._creation_stack))
+            # print("-------------------")
         super().__del__()
 
 
@@ -232,6 +243,15 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     # PostgreSQL backend-specific attributes.
     _named_cursor_idx = 0
     _connection_pools = {}
+
+    def __init__(self, *args, **kwargs):
+        self._creation_stack = "\n".join(traceback.format_stack())
+        if "QL" in os.environ:
+            print(f"QQQ {id(self)} BDW OPEN")
+            print(">>>>")
+            print(self._creation_stack)
+            print("<<<<")
+        super().__init__(*args, **kwargs)
 
     @property
     def pool(self):
@@ -559,6 +579,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         return commit_role or commit_tz
 
     def _close(self):
+        if "QL" in os.environ:
+            print(f"QQQ {id(self)} BDW CLOSE")
         if self.connection is not None:
             # `wrap_database_errors` only works for `putconn` as long as there
             # is no `reset` function set in the pool because it is deferred
@@ -575,6 +597,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
                     return self.connection.close()
 
     async def _aclose(self):
+        if "QL" in os.environ:
+            print(f"QQQ {id(self)} BDW CLOSE")
         if self.aconnection is not None:
             # `wrap_database_errors` only works for `putconn` as long as there
             # is no `reset` function set in the pool because it is deferred
@@ -819,6 +843,16 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
     def make_debug_cursor(self, cursor):
         return CursorDebugWrapper(cursor, self)
+
+    # def __del__(self):
+    #     print("CLOSING PG CONNECTION")
+    #     print("CREATION WAS AT")
+    #     print(self._creation_stack)
+    #     print("-------------------")
+    #     if self.connection:
+    #         print(f"{self.connection._closed=}")
+    #     if self.aconnection:
+    #         print(f"{self.aconnection._closed=}")
 
 
 if is_psycopg3:

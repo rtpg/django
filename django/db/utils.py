@@ -1,3 +1,4 @@
+import os
 import pkgutil
 from importlib import import_module
 
@@ -146,6 +147,10 @@ class ConnectionHandler(BaseConnectionHandler):
     # after async contexts, though, so we don't allow that if we can help it.
     thread_critical = True
 
+    # a reference to an async connection handler, to be used for building
+    # proper proxying
+    async_connections: "AsyncConnectionHandler"
+
     def configure_settings(self, databases):
         databases = super().configure_settings(databases)
         if databases == {}:
@@ -235,7 +240,13 @@ class AsyncConnectionHandler:
     Context-aware class to store async connections, mapped by alias name.
     """
 
+    LOG_HITS = False
+
     _from_testcase = False
+
+    # a reference to a sync connection handler, to be used for building
+    # proper proxying
+    sync_connections: ConnectionHandler
 
     def __init__(self) -> None:
         self._aliases = Local()
@@ -243,11 +254,18 @@ class AsyncConnectionHandler:
         setattr(self._connection_count, "value", 0)
 
     def __getitem__(self, alias):
+        if self.LOG_HITS:
+            print(f"ACH.__getitem__[{alias}]")
         try:
             async_alias = getattr(self._aliases, alias)
         except AttributeError:
+            if self.LOG_HITS:
+                print("CACHE MISS")
             async_alias = AsyncAlias()
             setattr(self._aliases, alias, async_alias)
+        else:
+            if self.LOG_HITS:
+                print("CACHE HIT")
         return async_alias
 
     def __repr__(self) -> str:
@@ -262,10 +280,14 @@ class AsyncConnectionHandler:
         return self.count == 0
 
     def add_connection(self, using, connection):
+        if "QL" in os.environ:
+            print(f"add_connection {using=}")
         self[using].add_connection(connection)
         setattr(self._connection_count, "value", self.count + 1)
 
     def pop_connection(self, using):
+        if "QL" in os.environ:
+            print(f"pop_connection {using=}")
         self[using].connections.pop()
         setattr(self._connection_count, "value", self.count - 1)
 
