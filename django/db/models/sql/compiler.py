@@ -1718,7 +1718,7 @@ class SQLCompiler:
         if result_type == CURSOR:
             # Give the caller the cursor to process and close.
             return cursor
-        if result_type == SINGLE:
+        elif result_type == SINGLE:
             try:
                 val = await cursor.afetchone()
                 if val:
@@ -1727,23 +1727,24 @@ class SQLCompiler:
             finally:
                 # done with the cursor
                 await cursor.aclose()
-        if result_type == NO_RESULTS:
+        elif result_type == NO_RESULTS:
             await cursor.aclose()
             return
-
-        result = cursor_iter(
-            cursor,
-            self.connection.features.empty_fetchmany_value,
-            self.col_count if self.has_extra_select else None,
-            chunk_size,
-        )
-        if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
-            # If we are using non-chunked reads, we return the same data
-            # structure as normally, but ensure it is all read into memory
-            # before going any further. Use chunked_fetch if requested,
-            # unless the database doesn't support it.
-            return list(result)
-        return result
+        else:
+            assert result_type == MULTI
+            result = cursor_iter(
+                cursor,
+                self.connection.features.empty_fetchmany_value,
+                self.col_count if self.has_extra_select else None,
+                chunk_size,
+            )
+            if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
+                # If we are using non-chunked reads, we return the same data
+                # structure as normally, but ensure it is all read into memory
+                # before going any further. Use chunked_fetch if requested,
+                # unless the database doesn't support it.
+                return list(result)
+            return result
 
     def as_subquery_condition(self, alias, columns, compiler):
         qn = compiler.quote_name_unless_alias
