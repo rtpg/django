@@ -444,11 +444,11 @@ setting, if needed for legacy databases.
 Models
 ------
 
-* Multiple changes have been made to the undocumented :meth:`SQLCompiler.execute_sql <django.db.models.sql.compiler.SQLCompiler.execute_sql>`
+* Multiple changes have been made to the undocumented `django.db.models.sql.compiler.SQLCompiler.execute_sql``
   method.
 
-  * :attr:`~django.db.models.sq.constants.CURSOR` has been removed as a possible value
-    for :meth:`~SQLCompiler.execute_sql`'s ``result_type`` parameter. Instead,
+  * ``django.db.models.sql.constants.CURSOR`` has been removed as a possible value
+    for ``SQLCompiler.execute_sql``'s ``result_type`` parameter. Instead,
     ``LEAK_CURSOR`` should be used if you want to receive the cursor back.
   * ``ROW_COUNT`` has been added as a result type, which returns the number of rows
     returned by the query directly, closing the cursor in the process.
