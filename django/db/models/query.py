@@ -26,7 +26,7 @@ from django.db.models.deletion import Collector
 from django.db.models.expressions import Case, F, Value, When
 from django.db.models.functions import Cast, Trunc
 from django.db.models.query_utils import FilteredRelation, Q
-from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE, ROW_COUNT
+from django.db.models.sql.constants import ROW_COUNT, CURSOR, GET_ITERATOR_CHUNK_SIZE
 from django.db.models.utils import (
     AltersData,
     create_namedtuple_class,
@@ -1295,7 +1295,7 @@ class QuerySet(AltersData):
         # Clear any annotations so that they won't be present in subqueries.
         query.annotations = {}
         self._result_cache = None
-        return await query.aget_compiler(self.db).aexecute_sql(CURSOR)
+        return await query.aget_compiler(self.db).aexecute_sql(ROW_COUNT)
 
     _update.alters_data = True
     _update.queryset_only = False

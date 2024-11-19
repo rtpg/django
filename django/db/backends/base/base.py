@@ -433,6 +433,7 @@ class BaseDatabaseWrapper:
 
     @from_codegen
     def _close(self):
+        print(f"YYY {id(self)} BDW CLOSE")
         if self.connection is not None:
             with self.wrap_database_errors:
                 return self.connection.close()
@@ -767,8 +768,8 @@ class BaseDatabaseWrapper:
         backends.
         """
         print(f"{id(self)}.aset_autocommit({autocommit})")
-        if autocommit is False:
-            raise ValueError("FALSE")
+        # if autocommit is False:
+        #     raise ValueError("FALSE")
         self.validate_no_atomic_block()
         await self.aclose_if_health_check_failed()
         await self.aensure_connection()

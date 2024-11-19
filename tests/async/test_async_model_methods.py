@@ -30,9 +30,6 @@ class AsyncModelOperationTest(TransactionTestCase):
 
     async def test_asave(self):
         self.s1.field = 10
-        import pdb
-
-        pdb.set_trace()
         await self.s1.asave()
         refetched = await SimpleModel.objects.aget()
         self.assertEqual(refetched.field, 10)

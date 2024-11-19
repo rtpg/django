@@ -32,7 +32,11 @@ class UnasyncifyMethod(cst.CSTTransformer):
         # we just remove the actual await
         return updated_node.expression
 
-    NAMES_TO_REWRITE = {"aconnection": "connection", "ASYNC_TRUTH_MARKER": "False"}
+    NAMES_TO_REWRITE = {
+        "aconnection": "connection",
+        "ASYNC_TRUTH_MARKER": "False",
+        "acursor": "cursor",
+    }
 
     def leave_Name(self, original_node, updated_node):
         # some names will get rewritten because we know

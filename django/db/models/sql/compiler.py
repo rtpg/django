@@ -1634,8 +1634,7 @@ class SQLCompiler:
                 return cursor.rowcount
             finally:
                 cursor.close()
-        if result_type == CURSOR:
-            # Give the caller the cursor to process and close.
+        elif result_type == CURSOR:
             return cursor
         elif result_type == SINGLE:
             try:
@@ -1649,10 +1648,13 @@ class SQLCompiler:
         elif result_type == NO_RESULTS:
             cursor.close()
             return
+        elif result_type == ROW_COUNT:
+            try:
+                return cursor.rowcount
+            finally:
+                cursor.close()
         else:
             assert result_type == MULTI
-            # NB: cursor is now managed by cursor_iter, which
-            # will close the cursor if/when everything is consumed
             result = cursor_iter(
                 cursor,
                 self.connection.features.empty_fetchmany_value,
@@ -1699,8 +1701,6 @@ class SQLCompiler:
                 raise ValueError("WRONG")
                 cursor = self.connection.chunked_cursor()
             else:
-                # XXX how to handle aexit here
-                cursor_ctx = self.connection.acursor()
                 cursor = await self.connection.acursor().__aenter__()
         else:
             if chunked_fetch:
@@ -1715,7 +1715,7 @@ class SQLCompiler:
             await cursor.aclose()
             raise
 
-        if result_type == CURSOR:
+        if result_type == LEAK_CURSOR:
             # Give the caller the cursor to process and close.
             return cursor
         elif result_type == SINGLE:
@@ -1730,6 +1730,11 @@ class SQLCompiler:
         elif result_type == NO_RESULTS:
             await cursor.aclose()
             return
+        elif result_type == ROW_COUNT:
+            try:
+                return cursor.rowcount
+            finally:
+                await cursor.aclose()
         else:
             assert result_type == MULTI
             result = cursor_iter(
@@ -2221,24 +2226,23 @@ class SQLUpdateCompiler(SQLCompiler):
         related queries are not available.
         """
         print("SQLUpdateCompiler.aexecute_sql START")
-        try:
-            cursor = await super().aexecute_sql(result_type)
-            try:
-                rows = cursor.rowcount if cursor else 0
-                is_empty = cursor is None
-            finally:
-                if cursor:
-                    await cursor.aclose()
-            for query in self.query.get_related_updates():
-                aux_rows = await query.get_compiler(
-                    self.using, raise_on_miss=True
-                ).aexecute_sql(result_type)
-                if is_empty and aux_rows:
-                    rows = aux_rows
-                    is_empty = False
-            return rows
-        finally:
-            print("SQLUpdateCompiler.execute_sql END")
+        row_count = await super().aexecute_sql(
+            ROW_COUNT if result_type == ROW_COUNT else NO_RESULTS
+        )
+        is_empty = row_count is None
+        row_count = row_count or 0
+
+        for query in self.query.get_related_updates():
+            # NB: if result_type == NO_RESULTS then aux_row_count is None
+            aux_row_count = await query.get_compiler(self.using).aexecute_sql(
+                result_type
+            )
+            if is_empty and aux_row_count:
+                # this will return the row count for any related updates as
+                # the number of rows updated
+                row_count = aux_row_count
+                is_empty = False
+        return row_count
 
     def pre_sql_setup(self):
         """

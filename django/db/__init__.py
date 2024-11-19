@@ -69,7 +69,8 @@ class new_connection:
         self.force_rollback = False
         if async_connections.empty is True:
             if async_connections._from_testcase is True:
-                self.force_rollback = True
+                # XXX wrong
+                self.force_rollback = self.force_rollback
         self.conn = conn
 
         async_connections.add_connection(self.using, self.conn)
