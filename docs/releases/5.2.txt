@@ -441,6 +441,19 @@ MySQL connections now default to using the ``utf8mb4`` character set, instead
 of ``utf8``, which is an alias for the deprecated character set ``utf8mb3``.
 ``utf8mb3`` can be specified in the ``OPTIONS`` part of the ``DATABASES``
 setting, if needed for legacy databases.
+Models
+------
+
+* Multiple changes have been made to the undocumented :meth:`SQLCompiler.execute_sql <django.db.models.sql.compiler.SQLCompiler.execute_sql>`
+  method.
+
+  * :attr:`~django.db.models.sq.constants.CURSOR` has been removed as a possible value
+    for :meth:`~SQLCompiler.execute_sql`'s ``result_type`` parameter. Instead,
+    ``LEAK_CURSOR`` should be used if you want to receive the cursor back.
+  * ``ROW_COUNT`` has been added as a result type, which returns the number of rows
+    returned by the query directly, closing the cursor in the process.
+  * ``UpdateSQLCompiler.execute_sql`` now only accepts ``NO_RESULT`` and ``LEAK_CURSOR``
+    as result types.
 
 Miscellaneous
 -------------

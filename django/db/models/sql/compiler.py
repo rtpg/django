@@ -13,8 +13,8 @@ from django.db.models.functions import Cast, Random
 from django.db.models.lookups import Lookup
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (
-    CURSOR,
     GET_ITERATOR_CHUNK_SIZE,
+    CURSOR,
     MULTI,
     NO_RESULTS,
     ORDER_DIR,
@@ -1637,7 +1637,7 @@ class SQLCompiler:
         if result_type == CURSOR:
             # Give the caller the cursor to process and close.
             return cursor
-        if result_type == SINGLE:
+        elif result_type == SINGLE:
             try:
                 val = cursor.fetchone()
                 if val:
@@ -1646,23 +1646,26 @@ class SQLCompiler:
             finally:
                 # done with the cursor
                 cursor.close()
-        if result_type == NO_RESULTS:
+        elif result_type == NO_RESULTS:
             cursor.close()
             return
-
-        result = cursor_iter(
-            cursor,
-            self.connection.features.empty_fetchmany_value,
-            self.col_count if self.has_extra_select else None,
-            chunk_size,
-        )
-        if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
-            # If we are using non-chunked reads, we return the same data
-            # structure as normally, but ensure it is all read into memory
-            # before going any further. Use chunked_fetch if requested,
-            # unless the database doesn't support it.
-            return list(result)
-        return result
+        else:
+            assert result_type == MULTI
+            # NB: cursor is now managed by cursor_iter, which
+            # will close the cursor if/when everything is consumed
+            result = cursor_iter(
+                cursor,
+                self.connection.features.empty_fetchmany_value,
+                self.col_count if self.has_extra_select else None,
+                chunk_size,
+            )
+            if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
+                # If we are using non-chunked reads, we return the same data
+                # structure as normally, but ensure it is all read into memory
+                # before going any further. Use chunked_fetch if requested,
+                # unless the database doesn't support it.
+                return list(result)
+            return result
 
     @generate_unasynced()
     async def aexecute_sql(
