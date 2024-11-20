@@ -19,7 +19,7 @@ from django.db import (
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
 from django.db.backends.utils import CursorWrapper
-from django.db.models.sql.constants import LEAK_CURSOR
+from django.db.models.sql.constants import CURSOR
 from django.test import (
     TestCase,
     TransactionTestCase,
