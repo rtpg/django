@@ -353,24 +353,18 @@ class SimpleTestCase(unittest.TestCase):
         return cdb_then_run
 
     @classmethod
-    async def use_async_connections(cls, test_method):
+    def use_async_connections(cls, test_method):
         # set up async  connections that will get rollbacked at the
         # end of the session
         import functools
         from contextlib import AsyncExitStack
         from django.db import new_connection
 
-        print("WRAPPING ", test_method)
-
         @functools.wraps(test_method)
-        async def cdb_then_run(*args, **kwargs):
+        async def cdb_then_run(self, *args, **kwargs):
             async with AsyncExitStack() as stack:
                 # connect to all the DBs
-                # HACK traverse __class__
-                import pdb
-
-                pdb.set_trace()
-                for db in test_method.__class__.databases:
+                for db in self.databases:
                     await stack.enter_async_context(
                         new_connection(using=db, force_rollback=True)
                     )
@@ -381,7 +375,7 @@ class SimpleTestCase(unittest.TestCase):
                     # import pdb
 
                     # pdb.set_trace()
-                await test_method(*args, **kwargs)
+                await test_method(self, *args, **kwargs)
 
         return cdb_then_run
 
