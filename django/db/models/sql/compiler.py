@@ -2225,7 +2225,6 @@ class SQLUpdateCompiler(SQLCompiler):
         non-empty query that is executed. Row counts for any subsequent,
         related queries are not available.
         """
-        print("SQLUpdateCompiler.aexecute_sql START")
         row_count = await super().aexecute_sql(
             ROW_COUNT if result_type == ROW_COUNT else NO_RESULTS
         )

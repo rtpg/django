@@ -706,13 +706,13 @@ class BaseDatabaseWrapper:
     def get_autocommit(self):
         """Get the autocommit state."""
         self.ensure_connection()
-        print(f"get_autocommit() <- {self.autocommit}")
+        # print(f"get_autocommit() <- {self.autocommit}")
         return self.autocommit
 
     async def aget_autocommit(self):
         """Get the autocommit state."""
         await self.aensure_connection()
-        print(f"aget_autocommit() <- {self.autocommit}")
+        # print(f"aget_autocommit() <- {self.autocommit}")
         return self.autocommit
 
     def set_autocommit(
@@ -729,7 +729,6 @@ class BaseDatabaseWrapper:
         explicit BEGIN with SQLite. This option will be ignored for other
         backends.
         """
-        print(f"set_autocommit({autocommit})")
         self.validate_no_atomic_block()
         self.close_if_health_check_failed()
         self.ensure_connection()
@@ -767,7 +766,7 @@ class BaseDatabaseWrapper:
         explicit BEGIN with SQLite. This option will be ignored for other
         backends.
         """
-        print(f"{id(self)}.aset_autocommit({autocommit})")
+        # print(f"{id(self)}.aset_autocommit({autocommit})")
         # if autocommit is False:
         #     raise ValueError("FALSE")
         self.validate_no_atomic_block()
