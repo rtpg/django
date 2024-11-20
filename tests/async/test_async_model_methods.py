@@ -28,6 +28,7 @@ class AsyncModelOperationTest(TransactionTestCase):
         super().setUp()
         self.s1 = SimpleModel.objects.create(field=0)
 
+    @TestCase.use_async_connections
     async def test_asave(self):
         self.s1.field = 10
         await self.s1.asave()
