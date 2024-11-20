@@ -656,12 +656,26 @@ class Shuffler:
         return [hashes[hashed] for hashed in sorted(hashes)]
 
 
+class SuccessTrackingTextTestResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.successes = []
+
+    def addSuccess(self, test):
+        super().addSuccess(test)
+        self.successes.append(test)
+
+
+class SuccessTrackingTextTestRunner(unittest.TextTestRunner):
+    resultclass = SuccessTrackingTextTestResult
+
+
 class DiscoverRunner:
-    """A Django test runner that uses unittest2 test discovery."""
+    """A Django tese runner that uses unittest2 test discovery."""
 
     test_suite = unittest.TestSuite
     parallel_test_suite = ParallelTestSuite
-    test_runner = unittest.TextTestRunner
+    test_runner = SuccessTrackingTextTestRunner
     test_loader = unittest.defaultTestLoader
     reorder_by = (TestCase, SimpleTestCase)
 
@@ -952,6 +966,15 @@ class DiscoverRunner:
         # _FailedTest objects include things like test modules that couldn't be
         # found or that couldn't be loaded due to syntax errors.
         test_types = (unittest.loader._FailedTest, *self.reorder_by)
+        try:
+            with open("passed.tests", "r") as passed_tests_f:
+                passed_tests = {l.strip() for l in passed_tests_f.read().splitlines()}
+        except FileNotFoundError:
+            passed_tests = {}
+
+        if len(passed_tests):
+            print("Filtering out previously passing tests")
+            all_tests = [t for t in all_tests if t.id() not in passed_tests]
         all_tests = list(
             reorder_tests(
                 all_tests,
@@ -1066,6 +1089,19 @@ class DiscoverRunner:
             )
         return databases
 
+    def _update_failed_tracking(self, result):
+        if result.wasSuccessful():
+            print("Removed passed tests")
+            try:
+                os.remove("passed.tests")
+            except FileNotFoundError:
+                pass
+        else:
+            passed_ids = [test.id() for test in result.successes]
+            with open("passed.tests", "a") as f:
+                f.write("\n".join(passed_ids))
+            print("Wrote passed tests")
+
     def run_tests(self, test_labels, **kwargs):
         """
         Run the unit tests for all the test labels in the provided list.
@@ -1095,6 +1131,7 @@ class DiscoverRunner:
             run_failed = True
             raise
         finally:
+            self._update_failed_tracking(result)
             try:
                 with self.time_keeper.timed("Total database teardown"):
                     self.teardown_databases(old_config)
