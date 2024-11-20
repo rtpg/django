@@ -49,8 +49,11 @@ class new_connection:
 
     BALANCE = 0
 
-    def __init__(self, using=DEFAULT_DB_ALIAS):
+    def __init__(self, using=DEFAULT_DB_ALIAS, force_rollback=False):
         self.using = using
+        if not self.force_rollback:
+            raise ValueError("FORCE ROLLBACK")
+        self.force_rollback = force_rollback
 
     async def __aenter__(self):
         self.__class__.BALANCE += 1
@@ -66,11 +69,6 @@ class new_connection:
             raise NotSupportedError(
                 "Can't open an async connection while inside of a synchronous transaction block"
             )
-        self.force_rollback = False
-        if async_connections.empty is True:
-            if async_connections._from_testcase is True:
-                # XXX wrong
-                self.force_rollback = self.force_rollback
         self.conn = conn
 
         async_connections.add_connection(self.using, self.conn)
@@ -83,7 +81,8 @@ class new_connection:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.__class__.BALANCE -= 1
-        print(f"new_connection balance (__aexit__) {self.__class__.BALANCE}")
+        if "QL" in os.environ:
+            print(f"new_connection balance (__aexit__) {self.__class__.BALANCE}")
         autocommit = await self.conn.aget_autocommit()
         if autocommit is False:
             if exc_type is None and self.force_rollback is False:
