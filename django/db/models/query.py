@@ -362,9 +362,18 @@ class QuerySet(AltersData):
             data[-1] = "...(remaining elements truncated)..."
         return "<%s %r>" % (self.__class__.__name__, data)
 
-    def __len__(self):
+    @from_codegen
+    def _fetch_then_len(self):
         self._fetch_all()
         return len(self._result_cache)
+
+    @generate_unasynced()
+    async def _afetch_then_len(self):
+        await self._afetch_all()
+        return len(self._result_cache)
+
+    def __len__(self):
+        return self._fetch_then_len()
 
     def __iter__(self):
         """
@@ -641,8 +650,78 @@ class QuerySet(AltersData):
             )
         )
 
+    @from_codegen
+    def get(self, *args, **kwargs):
+        """
+        Perform the query and return a single object matching the given
+        keyword arguments.
+        """
+        if self.query.combinator and (args or kwargs):
+            raise NotSupportedError(
+                "Calling QuerySet.get(...) with filters after %s() is not "
+                "supported." % self.query.combinator
+            )
+        clone = self._chain() if self.query.combinator else self.filter(*args, **kwargs)
+        if self.query.can_filter() and not self.query.distinct_fields:
+            clone = clone.order_by()
+        limit = None
+        if (
+            not clone.query.select_for_update
+            or connections[clone.db].features.supports_select_for_update_with_limit
+        ):
+            limit = MAX_GET_RESULTS
+            clone.query.set_limits(high=limit)
+        num = self._fetch_then_len()
+        if num == 1:
+            return clone._result_cache[0]
+        if not num:
+            raise self.model.DoesNotExist(
+                "%s matching query does not exist." % self.model._meta.object_name
+            )
+        raise self.model.MultipleObjectsReturned(
+            "get() returned more than one %s -- it returned %s!"
+            % (
+                self.model._meta.object_name,
+                num if not limit or num < limit else "more than %s" % (limit - 1),
+            )
+        )
+
+    @generate_unasynced()
     async def aget(self, *args, **kwargs):
-        return await sync_to_async(self.get)(*args, **kwargs)
+        """
+        Perform the query and return a single object matching the given
+        keyword arguments.
+        """
+        print("CALLING AGET")
+        if self.query.combinator and (args or kwargs):
+            raise NotSupportedError(
+                "Calling QuerySet.get(...) with filters after %s() is not "
+                "supported." % self.query.combinator
+            )
+        clone = self._chain() if self.query.combinator else self.filter(*args, **kwargs)
+        if self.query.can_filter() and not self.query.distinct_fields:
+            clone = clone.order_by()
+        limit = None
+        if (
+            not clone.query.select_for_update
+            or connections[clone.db].features.supports_select_for_update_with_limit
+        ):
+            limit = MAX_GET_RESULTS
+            clone.query.set_limits(high=limit)
+        num = await clone._afetch_then_len()
+        if num == 1:
+            return clone._result_cache[0]
+        if not num:
+            raise self.model.DoesNotExist(
+                "%s matching query does not exist." % self.model._meta.object_name
+            )
+        raise self.model.MultipleObjectsReturned(
+            "get() returned more than one %s -- it returned %s!"
+            % (
+                self.model._meta.object_name,
+                num if not limit or num < limit else "more than %s" % (limit - 1),
+            )
+        )
 
     def create(self, **kwargs):
         """
@@ -1981,11 +2060,19 @@ class QuerySet(AltersData):
         c._fields = self._fields
         return c
 
+    @from_codegen
     def _fetch_all(self):
         if self._result_cache is None:
-            self._result_cache = list(self._iterable_class(self))
+            self._result_cache = [elt for elt in self._iterable_class(self)]
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
+
+    @generate_unasynced()
+    async def _afetch_all(self):
+        if self._result_cache is None:
+            self._result_cache = [elt async for elt in self._iterable_class(self)]
+        if self._prefetch_related_lookups and not self._prefetch_done:
+            await self._aprefetch_related_objects()
 
     def _next_is_sticky(self):
         """
@@ -2153,6 +2240,18 @@ class RawQuerySet:
         prefetch_related_objects(self._result_cache, *self._prefetch_related_lookups)
         self._prefetch_done = True
 
+    @from_codegen
+    def _prefetch_related_objects(self):
+        prefetch_related_objects(self._result_cache, *self._prefetch_related_lookups)
+        self._prefetch_done = True
+
+    @generate_unasynced()
+    async def _aprefetch_related_objects(self):
+        await aprefetch_related_objects(
+            self._result_cache, *self._prefetch_related_lookups
+        )
+        self._prefetch_done = True
+
     def _clone(self):
         """Same as QuerySet._clone()"""
         c = self.__class__(
@@ -2172,6 +2271,16 @@ class RawQuerySet:
             self._result_cache = list(self.iterator())
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
+
+    @from_codegen
+    def _fetch_then_len(self):
+        self._fetch_all()
+        return len(self._result_cache)
+
+    @generate_unasynced()
+    async def _afetch_then_len(self):
+        await self._afetch_all()
+        return len(self._result_cache)
 
     def __len__(self):
         self._fetch_all()
