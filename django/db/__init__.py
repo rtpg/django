@@ -51,7 +51,7 @@ class new_connection:
 
     def __init__(self, using=DEFAULT_DB_ALIAS, force_rollback=False):
         self.using = using
-        if not self.force_rollback:
+        if not force_rollback:
             raise ValueError("FORCE ROLLBACK")
         self.force_rollback = force_rollback
 
