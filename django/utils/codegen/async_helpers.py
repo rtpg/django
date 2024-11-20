@@ -70,11 +70,9 @@ class UnasyncifyMethod(cst.CSTTransformer):
             unasync_name = self.unasynced_function_name(updated_node.func.value)
             if unasync_name is not None:
                 # let's transform it by removing the a
-                return updated_node.with_changes(
-                    func=updated_node.func.with_changes(
-                        name=func_name.with_changes(value=unasync_name)
-                    )
-                )
+                unasync_func_name = func_name.with_changes(value=unasync_name)
+                return updated_node.with_changes(func=unasync_func_name)
+
         elif isinstance(updated_node.func, cst.Attribute):
             func_name: cst.Name = updated_node.func.attr
             unasync_name = self.unasynced_function_name(updated_node.func.attr.value)
