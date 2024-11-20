@@ -865,6 +865,8 @@ class ManagerTest(SimpleTestCase):
         "exists",
         "contains",
         "explain",
+        "_ainsert",
+        "_aupdate",
         "_insert",
         "_update",
         "raw",

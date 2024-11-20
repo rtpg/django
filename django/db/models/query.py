@@ -1297,6 +1297,8 @@ class QuerySet(AltersData):
         self._result_cache = None
         return await query.aget_compiler(self.db).aexecute_sql(ROW_COUNT)
 
+    _aupdate.alters_data = True
+    _aupdate.queryset_only = False
     _update.alters_data = True
     _update.queryset_only = False
 
