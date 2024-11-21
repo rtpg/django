@@ -1151,6 +1151,7 @@ class DiscoverRunner:
                 serialized_aliases=suite.serialized_aliases,
             )
         run_failed = False
+        result = None
         try:
             self.run_checks(databases)
             result = self.run_suite(suite)
@@ -1158,7 +1159,8 @@ class DiscoverRunner:
             run_failed = True
             raise
         finally:
-            self._update_failed_tracking(result)
+            if result is not None:
+                self._update_failed_tracking(result)
             try:
                 with self.time_keeper.timed("Total database teardown"):
                     self.teardown_databases(old_config)
