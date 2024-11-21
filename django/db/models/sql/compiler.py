@@ -1561,6 +1561,7 @@ class SQLCompiler:
 
             yield row
 
+    @from_codegen
     def results_iter(
         self,
         results=None,
@@ -1582,6 +1583,28 @@ class SQLCompiler:
             rows = self.composite_fields_to_tuples(rows, fields)
         if tuple_expected:
             rows = map(tuple, rows)
+        return rows
+
+    @generate_unasynced()
+    async def aresults_iter(
+        self,
+        results=None,
+        tuple_expected=False,
+        chunked_fetch=False,
+        chunk_size=GET_ITERATOR_CHUNK_SIZE,
+    ):
+        """Return an iterator over the results from executing this query."""
+        if results is None:
+            results = await self.aexecute_sql(
+                MULTI, chunked_fetch=chunked_fetch, chunk_size=chunk_size
+            )
+        fields = [s[0] for s in self.select[0 : self.col_count]]
+        converters = self.get_converters(fields)
+        rows = chain.from_iterable(results)
+        if converters:
+            rows = self.apply_converters(rows, converters)
+            if tuple_expected:
+                rows = map(tuple, rows)
         return rows
 
     def has_results(self):
@@ -1666,7 +1689,7 @@ class SQLCompiler:
                 # structure as normally, but ensure it is all read into memory
                 # before going any further. Use chunked_fetch if requested,
                 # unless the database doesn't support it.
-                return list(result)
+                return [elt for elt in result]
             return result
 
     @generate_unasynced()
@@ -1737,18 +1760,26 @@ class SQLCompiler:
                 await cursor.aclose()
         else:
             assert result_type == MULTI
-            result = cursor_iter(
-                cursor,
-                self.connection.features.empty_fetchmany_value,
-                self.col_count if self.has_extra_select else None,
-                chunk_size,
-            )
+            if ASYNC_TRUTH_MARKER:
+                result = acursor_iter(
+                    cursor,
+                    self.connection.features.empty_fetchmany_value,
+                    self.col_count if self.has_extra_select else None,
+                    chunk_size,
+                )
+            else:
+                result = cursor_iter(
+                    cursor,
+                    self.connection.features.empty_fetchmany_value,
+                    self.col_count if self.has_extra_select else None,
+                    chunk_size,
+                )
             if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
                 # If we are using non-chunked reads, we return the same data
                 # structure as normally, but ensure it is all read into memory
                 # before going any further. Use chunked_fetch if requested,
                 # unless the database doesn't support it.
-                return list(result)
+                return [elt async for elt in result]
             return result
 
     def as_subquery_condition(self, alias, columns, compiler):
@@ -2334,13 +2365,33 @@ class SQLAggregateCompiler(SQLCompiler):
         return sql, params
 
 
+@from_codegen
 def cursor_iter(cursor, sentinel, col_count, itersize):
     """
     Yield blocks of rows from a cursor and ensure the cursor is closed when
     done.
     """
     try:
-        for rows in iter((lambda: cursor.fetchmany(itersize)), sentinel):
+        while True:
+            rows = cursor.fetchmany(itersize)
+            if rows == sentinel:
+                break
             yield rows if col_count is None else [r[:col_count] for r in rows]
     finally:
         cursor.close()
+
+
+@generate_unasynced()
+async def acursor_iter(cursor, sentinel, col_count, itersize):
+    """
+    Yield blocks of rows from a cursor and ensure the cursor is closed when
+    done.
+    """
+    try:
+        while True:
+            rows = await cursor.afetchmany(itersize)
+            if rows == sentinel:
+                break
+            yield rows if col_count is None else [r[:col_count] for r in rows]
+    finally:
+        await cursor.aclose()

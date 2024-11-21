@@ -51,7 +51,7 @@ class BaseIterable:
         self.chunked_fetch = chunked_fetch
         self.chunk_size = chunk_size
 
-    async def _async_generator(self):
+    async def _sync_to_async_generator(self):
         # Generators don't actually start running until the first time you call
         # next() on them, so make the generator object in the async thread and
         # then repeatedly dispatch to it in a sync thread.
@@ -66,6 +66,8 @@ class BaseIterable:
                 yield item
             if len(chunk) < self.chunk_size:
                 break
+
+    _async_generator = _sync_to_async_generator
 
     # __aiter__() is a *synchronous* method that has to then return an
     # *asynchronous* iterator/generator. Thus, nest an async generator inside
@@ -83,6 +85,10 @@ class ModelIterable(BaseIterable):
     """Iterable that yields a model instance for each row."""
 
     def __iter__(self):
+        return self._generator()
+
+    @from_codegen
+    def _generator(self):
         queryset = self.queryset
         db = queryset.db
         compiler = queryset.query.get_compiler(using=db)
@@ -144,6 +150,73 @@ class ModelIterable(BaseIterable):
                     setattr(obj, field.name, rel_obj)
 
             yield obj
+
+    @generate_unasynced()
+    async def _agenerator(self):
+        queryset = self.queryset
+        db = queryset.db
+        compiler = queryset.query.aget_compiler(using=db)
+        # Execute the query. This will also fill compiler.select, klass_info,
+        # and annotations.
+        results = await compiler.aexecute_sql(
+            chunked_fetch=self.chunked_fetch, chunk_size=self.chunk_size
+        )
+        select, klass_info, annotation_col_map = (
+            compiler.select,
+            compiler.klass_info,
+            compiler.annotation_col_map,
+        )
+        model_cls = klass_info["model"]
+        select_fields = klass_info["select_fields"]
+        model_fields_start, model_fields_end = select_fields[0], select_fields[-1] + 1
+        init_list = [
+            f[0].target.attname for f in select[model_fields_start:model_fields_end]
+        ]
+        related_populators = get_related_populators(klass_info, select, db)
+        known_related_objects = [
+            (
+                field,
+                related_objs,
+                operator.attrgetter(
+                    *[
+                        (
+                            field.attname
+                            if from_field == "self"
+                            else queryset.model._meta.get_field(from_field).attname
+                        )
+                        for from_field in field.from_fields
+                    ]
+                ),
+            )
+            for field, related_objs in queryset._known_related_objects.items()
+        ]
+        for row in await compiler.aresults_iter(results):
+            obj = model_cls.from_db(
+                db, init_list, row[model_fields_start:model_fields_end]
+            )
+            for rel_populator in related_populators:
+                rel_populator.populate(row, obj)
+            if annotation_col_map:
+                for attr_name, col_pos in annotation_col_map.items():
+                    setattr(obj, attr_name, row[col_pos])
+
+            # Add the known related objects to the model.
+            for field, rel_objs, rel_getter in known_related_objects:
+                # Avoid overwriting objects loaded by, e.g., select_related().
+                if field.is_cached(obj):
+                    continue
+                rel_obj_id = rel_getter(obj)
+                try:
+                    rel_obj = rel_objs[rel_obj_id]
+                except KeyError:
+                    pass  # May happen in qs1 | qs2 scenarios.
+                else:
+                    setattr(obj, field.name, rel_obj)
+
+            yield obj
+
+    def __aiter__(self):
+        return self._agenerator()
 
 
 class RawModelIterable(BaseIterable):
@@ -656,6 +729,7 @@ class QuerySet(AltersData):
         Perform the query and return a single object matching the given
         keyword arguments.
         """
+        print("CALLING AGET")
         if self.query.combinator and (args or kwargs):
             raise NotSupportedError(
                 "Calling QuerySet.get(...) with filters after %s() is not "
@@ -671,7 +745,7 @@ class QuerySet(AltersData):
         ):
             limit = MAX_GET_RESULTS
             clone.query.set_limits(high=limit)
-        num = self._fetch_then_len()
+        num = clone._fetch_then_len()
         if num == 1:
             return clone._result_cache[0]
         if not num:
