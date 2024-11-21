@@ -30,10 +30,13 @@ class AsyncModelOperationTest(TransactionTestCase):
 
     @TestCase.use_async_connections
     async def test_asave(self):
-        self.s1.field = 10
-        await self.s1.asave()
-        refetched = await SimpleModel.objects.aget()
-        self.assertEqual(refetched.field, 10)
+        from django.db.backends.utils import block_sync_ops
+
+        with block_sync_ops():
+            self.s1.field = 10
+            await self.s1.asave()
+            refetched = await SimpleModel.objects.aget()
+            self.assertEqual(refetched.field, 10)
 
     async def test_adelete(self):
         await self.s1.adelete()

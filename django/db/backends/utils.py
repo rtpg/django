@@ -11,12 +11,49 @@ from django.apps import apps
 from django.db import NotSupportedError
 from django.utils.dateparse import parse_time
 
+from asgiref.local import Local
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from django.db.backends.base.base import BaseDatabaseWrapper
 
 logger = logging.getLogger("django.db.backends")
+
+sync_cursor_ops_local = Local()
+sync_cursor_ops_local.value = False
+
+
+class sync_cursor_ops_blocked:
+    @classmethod
+    def get(cls):
+        return sync_cursor_ops_local.value
+
+    @classmethod
+    def set(cls, v):
+        sync_cursor_ops_local.value = v
+
+
+@contextmanager
+def block_sync_ops():
+    old_val = sync_cursor_ops_blocked.get()
+    sync_cursor_ops_blocked.set(True)
+    try:
+        print("Started blocking sync ops.")
+        yield
+    finally:
+        sync_cursor_ops_blocked.set(old_val)
+        print("Stopped blocking sync ops.")
+
+
+@contextmanager
+def unblock_sync_ops():
+    old_val = sync_cursor_ops_blocked.get()
+    sync_cursor_ops_blocked.set(False)
+    try:
+        yield
+    finally:
+        sync_cursor_ops_blocked.set(old_val)
 
 
 class CursorWrapper:
@@ -26,6 +63,8 @@ class CursorWrapper:
 
     WRAP_ERROR_ATTRS = frozenset(["fetchone", "fetchmany", "fetchall", "nextset"])
 
+    SYNC_BLOCK = {"close"}
+    SAFE_LIST = set()
     APPS_NOT_READY_WARNING_MSG = (
         "Accessing the database during app initialization is discouraged. To fix this "
         "warning, avoid executing queries in AppConfig.ready() or when your app "
@@ -33,6 +72,15 @@ class CursorWrapper:
     )
 
     def __getattr__(self, attr):
+        if sync_cursor_ops_blocked.get():
+            if attr in CursorWrapper.WRAP_ERROR_ATTRS:
+                raise ValueError("Sync operations blocked!")
+            elif attr in CursorWrapper.SYNC_BLOCK:
+                raise ValueError("Sync operations blocked!")
+            elif attr in CursorWrapper.SAFE_LIST:
+                pass
+            else:
+                print(f"CursorWrapper.{attr} accessed")
         cursor_attr = getattr(self.cursor, attr)
         if attr in CursorWrapper.WRAP_ERROR_ATTRS:
             return self.db.wrap_database_errors(cursor_attr)
@@ -203,12 +251,13 @@ class AsyncCursorWrapper(CursorWrapper):
 
     async def __aexit__(self, type, value, traceback):
         try:
-            await self.close()
+            await self.aclose()
         except self.db.Database.Error:
             pass
 
     async def aclose(self):
-        await self.close()
+        with unblock_sync_ops():
+            await self.close()
 
 
 class CursorDebugWrapper(CursorWrapper):
