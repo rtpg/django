@@ -27,7 +27,13 @@ sync_cursor_ops_local.value = False
 class sync_cursor_ops_blocked:
     @classmethod
     def get(cls):
-        return sync_cursor_ops_local.value
+        # This is extremely wrong! Maybe. To think about
+        try:
+            return sync_cursor_ops_local.value
+        except AttributeError:
+            # if it's not set... it's not True
+            sync_cursor_ops_local.value = False
+            return False
 
     @classmethod
     def set(cls, v):

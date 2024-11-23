@@ -85,7 +85,6 @@ class AsyncQuerySetTest(TestCase):
         count = await qs.acount()
         self.assertEqual(count, 3)
 
-    @TestCase.use_async_connections
     async def test_aget(self):
         instance = await SimpleModel.objects.aget(field=1)
         self.assertEqual(instance, self.s1)

@@ -1,4 +1,7 @@
+from contextlib import contextmanager
 import os
+from asgiref.local import Local
+
 from django.core import signals
 from django.db.utils import (
     DEFAULT_DB_ALIAS,
@@ -40,6 +43,37 @@ __all__ = [
 connections = ConnectionHandler()
 async_connections = AsyncConnectionHandler()
 
+new_connection_block_depth = Local()
+new_connection_block_depth.value = 0
+
+
+def modify_cxn_depth(f):
+    try:
+        existing_value = new_connection_block_depth.value
+    except AttributeError:
+        existing_value = 0
+    new_connection_block_depth.value = f(existing_value)
+
+
+def should_use_sync_fallback(async_variant):
+    return async_variant and (new_connection_block_depth.value == 0)
+
+
+commit_allowed = Local()
+commit_allowed.value = False
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def allow_commits():
+    old_value = commit_allowed.value
+    commit_allowed.value = True
+    try:
+        yield
+    finally:
+        commit_allowed.value = old_value
+
 
 class new_connection:
     """
@@ -51,12 +85,17 @@ class new_connection:
 
     def __init__(self, using=DEFAULT_DB_ALIAS, force_rollback=False):
         self.using = using
-        if not force_rollback:
-            raise ValueError("FORCE ROLLBACK")
+        if not force_rollback and not commit_allowed.value:
+            # this is for just figuring everything out
+            raise ValueError(
+                "Commits are not allowed unless in an allow_commits() context"
+            )
         self.force_rollback = force_rollback
 
     async def __aenter__(self):
         self.__class__.BALANCE += 1
+        # XXX stupid nonsense
+        modify_cxn_depth(lambda v: v + 1)
         if "QL" in os.environ:
             print(f"new_connection balance(__aenter__) {self.__class__.BALANCE}")
         conn = connections.create_connection(self.using)
@@ -81,6 +120,8 @@ class new_connection:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.__class__.BALANCE -= 1
+        # silly nonsense (again)
+        modify_cxn_depth(lambda v: v - 1)
         if "QL" in os.environ:
             print(f"new_connection balance (__aexit__) {self.__class__.BALANCE}")
         autocommit = await self.conn.aget_autocommit()

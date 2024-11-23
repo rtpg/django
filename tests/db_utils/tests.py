@@ -150,7 +150,7 @@ class AsyncConnectionTests(SimpleTestCase):
     def test_new_connection_threading(self):
         async def coro():
             assert async_connections.empty is True
-            async with new_connection() as connection:
+            async with new_connection(force_rollback=True) as connection:
                 async with connection.acursor() as c:
                     await c.execute("SELECT 1")
 
@@ -161,10 +161,10 @@ class AsyncConnectionTests(SimpleTestCase):
         with self.assertRaises(ConnectionDoesNotExist):
             async_connections.get_connection(DEFAULT_DB_ALIAS)
 
-        async with new_connection():
+        async with new_connection(force_rollback=True):
             conn1 = async_connections.get_connection(DEFAULT_DB_ALIAS)
             self.assertIsNotNone(conn1.aconnection)
-            async with new_connection():
+            async with new_connection(force_rollback=True):
                 conn2 = async_connections.get_connection(DEFAULT_DB_ALIAS)
                 self.assertIsNotNone(conn1.aconnection)
                 self.assertIsNotNone(conn2.aconnection)
@@ -180,5 +180,5 @@ class AsyncConnectionTests(SimpleTestCase):
     @unittest.skipUnless(connection.supports_async is False, "Sync DB test")
     async def test_new_connection_on_sync(self):
         with self.assertRaises(NotSupportedError):
-            async with new_connection():
+            async with new_connection(force_rollback=True):
                 async_connections.get_connection(DEFAULT_DB_ALIAS)

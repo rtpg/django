@@ -8,6 +8,7 @@ from django.db import (
     Error,
     IntegrityError,
     OperationalError,
+    allow_commits,
     connection,
     new_connection,
     transaction,
@@ -586,71 +587,74 @@ class AsyncTransactionTestCase(TransactionTestCase):
     available_apps = ["transactions"]
 
     async def test_new_connection_nested(self):
-        async with new_connection() as connection:
-            async with new_connection() as connection2:
-                await connection2.aset_autocommit(False)
-                async with connection2.acursor() as cursor2:
-                    await cursor2.aexecute(
-                        "INSERT INTO transactions_reporter "
-                        "(first_name, last_name, email) "
-                        "VALUES (%s, %s, %s)",
-                        ("Sarah", "Hatoff", ""),
-                    )
-                    await cursor2.aexecute("SELECT * FROM transactions_reporter")
-                    result = await cursor2.afetchmany()
-                    assert len(result) == 1
+        with allow_commits():
+            async with new_connection() as connection:
+                async with new_connection() as connection2:
+                    await connection2.aset_autocommit(False)
+                    async with connection2.acursor() as cursor2:
+                        await cursor2.aexecute(
+                            "INSERT INTO transactions_reporter "
+                            "(first_name, last_name, email) "
+                            "VALUES (%s, %s, %s)",
+                            ("Sarah", "Hatoff", ""),
+                        )
+                        await cursor2.aexecute("SELECT * FROM transactions_reporter")
+                        result = await cursor2.afetchmany()
+                        assert len(result) == 1
 
-            async with connection.acursor() as cursor:
-                await cursor.aexecute("SELECT * FROM transactions_reporter")
-                result = await cursor.afetchmany()
-                assert len(result) == 1
-
-    async def test_new_connection_nested2(self):
-        async with new_connection() as connection:
-            async with connection.acursor() as cursor:
-                await cursor.aexecute(
-                    "INSERT INTO transactions_reporter (first_name, last_name, email) "
-                    "VALUES (%s, %s, %s)",
-                    ("Sarah", "Hatoff", ""),
-                )
-                await cursor.aexecute("SELECT * FROM transactions_reporter")
-                result = await cursor.afetchmany()
-                assert len(result) == 1
-
-            async with new_connection() as connection2:
-                await connection2.aset_autocommit(False)
-                async with connection2.acursor() as cursor2:
-                    await cursor2.aexecute("SELECT * FROM transactions_reporter")
-                    result = await cursor2.afetchmany()
-                    # This connection won't see any rows, because the outer one
-                    # hasn't committed yet.
-                    assert len(result) == 0
-
-    async def test_new_connection_nested3(self):
-        async with new_connection() as connection:
-            async with new_connection() as connection2:
-                await connection2.aset_autocommit(False)
-                assert id(connection) != id(connection2)
-                async with connection2.acursor() as cursor2:
-                    await cursor2.aexecute(
-                        "INSERT INTO transactions_reporter "
-                        "(first_name, last_name, email) "
-                        "VALUES (%s, %s, %s)",
-                        ("Sarah", "Hatoff", ""),
-                    )
-                    await cursor2.aexecute("SELECT * FROM transactions_reporter")
-                    result = await cursor2.afetchmany()
-                    assert len(result) == 1
-
-                # Outermost connection doesn't see what the innermost did, because the
-                # innermost connection hasn't exited yet.
                 async with connection.acursor() as cursor:
                     await cursor.aexecute("SELECT * FROM transactions_reporter")
                     result = await cursor.afetchmany()
-                    assert len(result) == 0
+                    assert len(result) == 1
+
+    async def test_new_connection_nested2(self):
+        with allow_commits():
+            async with new_connection() as connection:
+                await connection.aset_autocommit(False)
+                async with connection.acursor() as cursor:
+                    await cursor.aexecute(
+                        "INSERT INTO transactions_reporter (first_name, last_name, email) "
+                        "VALUES (%s, %s, %s)",
+                        ("Tina", "Gravita", ""),
+                    )
+                    await cursor.aexecute("SELECT * FROM transactions_reporter")
+                    result = await cursor.afetchmany()
+                    assert len(result) == 1
+
+                async with new_connection() as connection2:
+                    async with connection2.acursor() as cursor2:
+                        await cursor2.aexecute("SELECT * FROM transactions_reporter")
+                        result = await cursor2.afetchmany()
+                        # This connection won't see any rows, because the outer one
+                        # hasn't committed yet.
+                        self.assertEqual(result, [])
+
+    async def test_new_connection_nested3(self):
+        with allow_commits():
+            async with new_connection() as connection:
+                async with new_connection() as connection2:
+                    await connection2.aset_autocommit(False)
+                    assert id(connection) != id(connection2)
+                    async with connection2.acursor() as cursor2:
+                        await cursor2.aexecute(
+                            "INSERT INTO transactions_reporter "
+                            "(first_name, last_name, email) "
+                            "VALUES (%s, %s, %s)",
+                            ("Sarah", "Hatoff", ""),
+                        )
+                        await cursor2.aexecute("SELECT * FROM transactions_reporter")
+                        result = await cursor2.afetchmany()
+                        assert len(result) == 1
+
+                    # Outermost connection doesn't see what the innermost did, because the
+                    # innermost connection hasn't exited yet.
+                    async with connection.acursor() as cursor:
+                        await cursor.aexecute("SELECT * FROM transactions_reporter")
+                        result = await cursor.afetchmany()
+                        assert len(result) == 0
 
     async def test_asavepoint(self):
-        async with new_connection() as connection:
+        async with new_connection(force_rollback=True) as connection:
             async with connection.acursor() as cursor:
                 sid = await connection.asavepoint()
                 assert sid is not None

@@ -18,6 +18,7 @@ from django.db import (
     NotSupportedError,
     connections,
     router,
+    should_use_sync_fallback,
     transaction,
 )
 from django.db.models import AutoField, DateField, DateTimeField, Field, sql
@@ -33,7 +34,7 @@ from django.db.models.utils import (
     resolve_callables,
 )
 from django.utils import timezone
-from django.utils.codegen import from_codegen, generate_unasynced
+from django.utils.codegen import ASYNC_TRUTH_MARKER, from_codegen, generate_unasynced
 from django.utils.functional import cached_property, partition
 
 # The maximum number of results to fetch in a get() query.
@@ -216,7 +217,10 @@ class ModelIterable(BaseIterable):
             yield obj
 
     def __aiter__(self):
-        return self._agenerator()
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return self._sync_to_async_generator()
+        else:
+            return self._agenerator()
 
 
 class RawModelIterable(BaseIterable):
@@ -729,7 +733,6 @@ class QuerySet(AltersData):
         Perform the query and return a single object matching the given
         keyword arguments.
         """
-        print("CALLING AGET")
         if self.query.combinator and (args or kwargs):
             raise NotSupportedError(
                 "Calling QuerySet.get(...) with filters after %s() is not "
@@ -766,7 +769,9 @@ class QuerySet(AltersData):
         Perform the query and return a single object matching the given
         keyword arguments.
         """
-        print("CALLING AGET")
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.get)(*args, **kwargs)
+
         if self.query.combinator and (args or kwargs):
             raise NotSupportedError(
                 "Calling QuerySet.get(...) with filters after %s() is not "
