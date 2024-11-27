@@ -94,6 +94,11 @@ def _get_varchar_column(data):
     return "varchar(%(max_length)s)" % data
 
 
+# additions to make OTel instrumentation work properly
+Database.AsyncConnection.pq = Database.pq
+Database.Connection.pq = Database.pq
+
+
 class ASCXN(Database.AsyncConnection):
     LOG_CREATIONS = True
     LOG_DELETIONS = True
