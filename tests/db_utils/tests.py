@@ -161,8 +161,9 @@ class AsyncConnectionTests(SimpleTestCase):
         with self.assertRaises(ConnectionDoesNotExist):
             async_connections.get_connection(DEFAULT_DB_ALIAS)
 
-        async with new_connection(force_rollback=True):
+        async with new_connection(force_rollback=True) as aconn:
             conn1 = async_connections.get_connection(DEFAULT_DB_ALIAS)
+            self.assertEqual(conn1, aconn)
             self.assertIsNotNone(conn1.aconnection)
             async with new_connection(force_rollback=True):
                 conn2 = async_connections.get_connection(DEFAULT_DB_ALIAS)
