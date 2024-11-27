@@ -67,12 +67,21 @@ from contextlib import contextmanager
 
 @contextmanager
 def allow_commits():
-    old_value = commit_allowed.value
+    old_value = getattr(commit_allowed, "value", False)
     commit_allowed.value = True
     try:
         yield
     finally:
         commit_allowed.value = old_value
+
+
+def is_commit_allowed():
+    try:
+        return commit_allowed.value
+    except:
+        # XXX mess
+        commit_allowed.value = False
+        return False
 
 
 class new_connection:
@@ -85,7 +94,7 @@ class new_connection:
 
     def __init__(self, using=DEFAULT_DB_ALIAS, force_rollback=False):
         self.using = using
-        if not force_rollback and not commit_allowed.value:
+        if not force_rollback and not is_commit_allowed():
             # this is for just figuring everything out
             raise ValueError(
                 "Commits are not allowed unless in an allow_commits() context"
