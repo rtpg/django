@@ -4,31 +4,37 @@ from datetime import datetime
 
 from asgiref.sync import async_to_sync, sync_to_async
 
-from django.db import NotSupportedError, connection
+from django.db import NotSupportedError, connection, new_connection
 from django.db.models import Prefetch, Sum
-from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
+from django.test import (
+    TransactionTestCase,
+    TestCase,
+    skipIfDBFeature,
+    skipUnlessDBFeature,
+)
 
 from .models import RelatedModel, SimpleModel
 
 
-class AsyncQuerySetTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.s1 = SimpleModel.objects.create(
+class AsyncQuerySetTest(TransactionTestCase):
+    available_apps = ["async"]
+
+    def setUp(self):
+        self.s1 = SimpleModel.objects.create(
             field=1,
             created=datetime(2022, 1, 1, 0, 0, 0),
         )
-        cls.s2 = SimpleModel.objects.create(
+        self.s2 = SimpleModel.objects.create(
             field=2,
             created=datetime(2022, 1, 1, 0, 0, 1),
         )
-        cls.s3 = SimpleModel.objects.create(
+        self.s3 = SimpleModel.objects.create(
             field=3,
             created=datetime(2022, 1, 1, 0, 0, 2),
         )
-        cls.r1 = RelatedModel.objects.create(simple=cls.s1)
-        cls.r2 = RelatedModel.objects.create(simple=cls.s2)
-        cls.r3 = RelatedModel.objects.create(simple=cls.s3)
+        self.r1 = RelatedModel.objects.create(simple=self.s1)
+        self.r2 = RelatedModel.objects.create(simple=self.s2)
+        self.r3 = RelatedModel.objects.create(simple=self.s3)
 
     @staticmethod
     def _get_db_feature(connection_, feature_name):
@@ -257,3 +263,32 @@ class AsyncQuerySetTest(TestCase):
         sql = "SELECT id, field FROM async_simplemodel WHERE created=%s"
         qs = SimpleModel.objects.raw(sql, [self.s1.created])
         self.assertEqual([o async for o in qs], [self.s1])
+
+
+# for all the test methods on AsyncQuerySetTest
+# we will add a variant, that first opens a new
+# async connection
+
+
+def _tests():
+    return [(attr, getattr(AsyncQuerySetTest, attr)) for attr in dir(AsyncQuerySetTest)]
+
+
+def wrap_test(original_test, test_name):
+    """
+    Given an async test, provide an async test that
+    is generating a new connection
+    """
+    new_test_name = test_name + "_new_cxn"
+
+    async def wrapped_test(self):
+        async with new_connection(force_rollback=True):
+            await original_test(self)
+
+    wrapped_test.__name__ = new_test_name
+    return (new_test_name, wrapped_test)
+
+
+for test_name, test in _tests():
+    new_name, new_test = wrap_test(test, test_name)
+    setattr(AsyncQuerySetTest, new_name, new_test)
