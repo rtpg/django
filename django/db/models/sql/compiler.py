@@ -1575,6 +1575,10 @@ class SQLCompiler:
             results = self.execute_sql(
                 MULTI, chunked_fetch=chunked_fetch, chunk_size=chunk_size
             )
+        else:
+            # XXX wrong
+            if isinstance(results, AsyncGenerator):
+                results = [r for r in results]
         fields = [s[0] for s in self.select[0 : self.col_count]]
         converters = self.get_converters(fields)
         rows = chain.from_iterable(results)
@@ -1645,8 +1649,6 @@ class SQLCompiler:
                 return iter([])
             else:
                 return
-        # if "pg_sleep" in sql:
-        #     raise ValueError("FOUND")
         if chunked_fetch:
             cursor = self.connection.chunked_cursor()
         else:

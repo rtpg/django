@@ -156,7 +156,10 @@ class ModelIterable(BaseIterable):
     async def _agenerator(self):
         queryset = self.queryset
         db = queryset.db
-        compiler = queryset.query.aget_compiler(using=db)
+        if ASYNC_TRUTH_MARKER:
+            compiler = queryset.query.aget_compiler(using=db)
+        else:
+            compiler = queryset.query.get_compiler(using=db)
         # Execute the query. This will also fill compiler.select, klass_info,
         # and annotations.
         results = await compiler.aexecute_sql(
@@ -676,6 +679,7 @@ class QuerySet(AltersData):
     async def aaggregate(self, *args, **kwargs):
         return await sync_to_async(self.aggregate)(*args, **kwargs)
 
+    @from_codegen
     def count(self):
         """
         Perform a SELECT COUNT() and return the number of records as an
@@ -689,8 +693,22 @@ class QuerySet(AltersData):
 
         return self.query.get_count(using=self.db)
 
+    @generate_unasynced()
     async def acount(self):
-        return await sync_to_async(self.count)()
+        """
+        Perform a SELECT COUNT() and return the number of records as an
+        integer.
+
+        If the QuerySet is already fully cached, return the length of the
+        cached results set to avoid multiple SELECT COUNT(*) calls.
+        """
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.count)()
+        if self._result_cache is not None:
+            return len(self._result_cache)
+
+        return await self.query.aget_count(using=self.db)
 
     @from_codegen
     def get(self, *args, **kwargs):
@@ -698,6 +716,9 @@ class QuerySet(AltersData):
         Perform the query and return a single object matching the given
         keyword arguments.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.get)(*args, **kwargs)
+
         if self.query.combinator and (args or kwargs):
             raise NotSupportedError(
                 "Calling QuerySet.get(...) with filters after %s() is not "
