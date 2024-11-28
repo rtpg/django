@@ -3,6 +3,7 @@ import json
 import re
 from functools import partial
 from itertools import chain
+from typing import AsyncGenerator
 
 from django.core.exceptions import EmptyResultSet, FieldError, FullResultSet
 from django.db import DatabaseError, NotSupportedError
@@ -1598,6 +1599,10 @@ class SQLCompiler:
             results = await self.aexecute_sql(
                 MULTI, chunked_fetch=chunked_fetch, chunk_size=chunk_size
             )
+        else:
+            # XXX wrong
+            if isinstance(results, AsyncGenerator):
+                results = [r async for r in results]
         fields = [s[0] for s in self.select[0 : self.col_count]]
         converters = self.get_converters(fields)
         rows = chain.from_iterable(results)
@@ -1640,6 +1645,8 @@ class SQLCompiler:
                 return iter([])
             else:
                 return
+        # if "pg_sleep" in sql:
+        #     raise ValueError("FOUND")
         if chunked_fetch:
             cursor = self.connection.chunked_cursor()
         else:
@@ -1718,11 +1725,11 @@ class SQLCompiler:
                 return iter([])
             else:
                 return
+        # if "pg_sleep" in sql:
+        #     raise ValueError("FOUND")
         if ASYNC_TRUTH_MARKER:
             if chunked_fetch:
-                # XXX def wrong
-                raise ValueError("WRONG")
-                cursor = self.connection.chunked_cursor()
+                cursor = await (await self.connection.achunked_cursor()).__aenter__()
             else:
                 cursor = await self.connection.acursor().__aenter__()
         else:

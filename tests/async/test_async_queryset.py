@@ -94,6 +94,10 @@ class AsyncQuerySetTest(TransactionTestCase):
     async def test_aget(self):
         instance = await SimpleModel.objects.aget(field=1)
         self.assertEqual(instance, self.s1)
+        with self.assertRaises(SimpleModel.MultipleObjectsReturned):
+            await SimpleModel.objects.aget()
+        with self.assertRaises(SimpleModel.DoesNotExist):
+            await SimpleModel.objects.aget(field=98)
 
     async def test_acreate(self):
         await SimpleModel.objects.acreate(field=4)
@@ -122,7 +126,6 @@ class AsyncQuerySetTest(TransactionTestCase):
         self.assertEqual(instance.field, 6)
 
     @skipUnlessDBFeature("has_bulk_insert")
-    @async_to_sync
     async def test_abulk_create(self):
         instances = [SimpleModel(field=i) for i in range(10)]
         qs = await SimpleModel.objects.abulk_create(instances)
@@ -230,7 +233,6 @@ class AsyncQuerySetTest(TransactionTestCase):
         self.assertCountEqual(qs, [self.s1, self.s3])
 
     @skipUnlessDBFeature("supports_explaining_query_execution")
-    @async_to_sync
     async def test_aexplain(self):
         supported_formats = await sync_to_async(self._get_db_feature)(
             connection, "supported_explain_formats"
