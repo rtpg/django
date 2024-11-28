@@ -716,8 +716,6 @@ class QuerySet(AltersData):
         Perform the query and return a single object matching the given
         keyword arguments.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.get)(*args, **kwargs)
 
         if self.query.combinator and (args or kwargs):
             raise NotSupportedError(
@@ -755,8 +753,9 @@ class QuerySet(AltersData):
         Perform the query and return a single object matching the given
         keyword arguments.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.get)(*args, **kwargs)
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.get)(*args, **kwargs)
 
         if self.query.combinator and (args or kwargs):
             raise NotSupportedError(
@@ -788,6 +787,7 @@ class QuerySet(AltersData):
             )
         )
 
+    @from_codegen
     def create(self, **kwargs):
         """
         Create a new object with the given kwargs, saving it to the database
@@ -809,9 +809,30 @@ class QuerySet(AltersData):
 
     create.alters_data = True
 
+    @generate_unasynced()
     async def acreate(self, **kwargs):
-        return await sync_to_async(self.create)(**kwargs)
+        """
+        Create a new object with the given kwargs, saving it to the database
+        and returning the created object.
+        """
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.create)(**kwargs)
+        reverse_one_to_one_fields = frozenset(kwargs).intersection(
+            self.model._meta._reverse_one_to_one_field_names
+        )
+        if reverse_one_to_one_fields:
+            raise ValueError(
+                "The following fields do not exist in this model: %s"
+                % ", ".join(reverse_one_to_one_fields)
+            )
 
+        obj = self.model(**kwargs)
+        self._for_write = True
+        await obj.asave(force_insert=True, using=self.db)
+        return obj
+
+    create.alters_data = True
     acreate.alters_data = True
 
     def _prepare_for_bulk_create(self, objs):

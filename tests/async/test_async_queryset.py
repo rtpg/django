@@ -125,16 +125,23 @@ class AsyncQuerySetTest(TransactionTestCase):
         self.assertIs(created, True)
         self.assertEqual(instance.field, 6)
 
-    @skipUnlessDBFeature("has_bulk_insert")
+    def ensure_feature(self, *args):
+        if not all(getattr(connection.features, feature, False) for feature in args):
+            self.skipTest(f"Database doesn't support feature(s): {', '.join(args)}")
+
+    def skip_if_feature(self, *args):
+        if any(getattr(connection.features, feature, False) for feature in args):
+            self.skipTest(f"Database supports feature(s): {', '.join(args)}")
+
     async def test_abulk_create(self):
+        self.ensure_feature("has_bulk_insert")
         instances = [SimpleModel(field=i) for i in range(10)]
         qs = await SimpleModel.objects.abulk_create(instances)
         self.assertEqual(len(qs), 10)
 
-    @skipUnlessDBFeature("has_bulk_insert", "supports_update_conflicts")
-    @skipIfDBFeature("supports_update_conflicts_with_target")
-    @async_to_sync
     async def test_update_conflicts_unique_field_unsupported(self):
+        self.ensure_feature("has_bulk_insert", "support_update_conflicts")
+        self.skip_if_feature("supports_update_conflicts_with_target")
         msg = (
             "This database backend does not support updating conflicts with specifying "
             "unique fields that can trigger the upsert."
@@ -232,8 +239,8 @@ class AsyncQuerySetTest(TransactionTestCase):
         qs = [o async for o in SimpleModel.objects.all()]
         self.assertCountEqual(qs, [self.s1, self.s3])
 
-    @skipUnlessDBFeature("supports_explaining_query_execution")
     async def test_aexplain(self):
+        self.ensure_feature("supports_explaining_query_execution")
         supported_formats = await sync_to_async(self._get_db_feature)(
             connection, "supported_explain_formats"
         )
