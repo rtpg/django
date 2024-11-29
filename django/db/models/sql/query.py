@@ -890,10 +890,20 @@ class Query(BaseExpression):
         q.add_annotation(Value(1), "a")
         return q
 
+    @from_codegen
     def has_results(self, using):
         q = self.exists()
         compiler = q.get_compiler(using=using)
         return compiler.has_results()
+
+    @generate_unasynced()
+    async def ahas_results(self, using):
+        q = self.exists()
+        if ASYNC_TRUTH_MARKER:
+            compiler = q.aget_compiler(using=using)
+        else:
+            compiler = q.get_compiler(using=using)
+        return await compiler.ahas_results()
 
     def explain(self, using, format=None, **options):
         q = self.clone()

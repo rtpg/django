@@ -111,21 +111,35 @@ def set_rollback(rollback, using=None):
     return get_connection(using).set_rollback(rollback)
 
 
-@asynccontextmanager
-async def amark_for_rollback_on_error(using=None):
-    # XXX port documentation
-    try:
-        yield
-    except Exception as exc:
-        # XXX locking
-        connection = await aget_connection(using)
-        if connection.in_atomic_block:
-            connection.needs_rollback = True
-            connection.rollback_exc = exc
-        raise
+class MarkForRollbackOnError:
+    def __init__(self, using):
+        self.using = using
+
+    def __enter__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_val is not None:
+            connection = await aget_connection(self.using)
+            if connection.in_atomic_block:
+                connection.needs_rollback = True
+                connection.rollback_exc = exc_val
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_val is not None:
+            connection = get_connection(self.using)
+            if connection.in_atomic_block:
+                connection.needs_rollback = True
+                connection.rollback_exc = exc_val
 
 
-@contextmanager
+def amark_for_rollback_on_error(using=None):
+    return MarkForRollbackOnError(using=using)
+
+
 def mark_for_rollback_on_error(using=None):
     """
     Internal low-level utility to mark a transaction as "needs rollback" when
@@ -144,14 +158,7 @@ def mark_for_rollback_on_error(using=None):
 
     but it uses low-level utilities to avoid performance overhead.
     """
-    try:
-        yield
-    except Exception as exc:
-        connection = get_connection(using)
-        if connection.in_atomic_block:
-            connection.needs_rollback = True
-            connection.rollback_exc = exc
-        raise
+    return MarkForRollbackOnError(using=using)
 
 
 def on_commit(func, using=None, robust=False):

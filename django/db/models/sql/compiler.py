@@ -1845,12 +1845,21 @@ class SQLCompiler:
                 rows = map(tuple, rows)
         return rows
 
+    @from_codegen
     def has_results(self):
         """
         Backends (e.g. NoSQL) can override this in order to use optimized
         versions of "query has any results."
         """
         return bool(self.execute_sql(SINGLE))
+
+    @generate_unasynced()
+    async def ahas_results(self):
+        """
+        Backends (e.g. NoSQL) can override this in order to use optimized
+        versions of "query has any results."
+        """
+        return bool(await self.aexecute_sql(SINGLE))
 
     @from_codegen
     def execute_sql(

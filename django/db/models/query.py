@@ -1802,16 +1802,27 @@ class QuerySet(AltersData):
     _update.alters_data = True
     _update.queryset_only = False
 
+    @from_codegen
     def exists(self):
         """
         Return True if the QuerySet would have any results, False otherwise.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.exists)()
         if self._result_cache is None:
             return self.query.has_results(using=self.db)
         return bool(self._result_cache)
 
+    @generate_unasynced()
     async def aexists(self):
-        return await sync_to_async(self.exists)()
+        """
+        Return True if the QuerySet would have any results, False otherwise.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.exists)()
+        if self._result_cache is None:
+            return await self.query.ahas_results(using=self.db)
+        return bool(self._result_cache)
 
     def contains(self, obj):
         """
