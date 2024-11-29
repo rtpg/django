@@ -2508,6 +2508,7 @@ class SQLDeleteCompiler(SQLCompiler):
 
 
 class SQLUpdateCompiler(SQLCompiler):
+
     @from_codegen
     def as_sql(self):
         """

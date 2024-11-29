@@ -1342,6 +1342,7 @@ class QuerySet(AltersData):
             )
         return params
 
+    @from_codegen
     def _earliest(self, *fields):
         """
         Return the earliest object according to fields (if given) or by the
@@ -1364,25 +1365,68 @@ class QuerySet(AltersData):
         obj.query.add_ordering(*order_by)
         return obj.get()
 
+    @generate_unasynced()
+    async def _aearliest(self, *fields):
+        """
+        Return the earliest object according to fields (if given) or by the
+        model's Meta.get_latest_by.
+        """
+        if fields:
+            order_by = fields
+        else:
+            order_by = getattr(self.model._meta, "get_latest_by")
+            if order_by and not isinstance(order_by, (tuple, list)):
+                order_by = (order_by,)
+        if order_by is None:
+            raise ValueError(
+                "earliest() and latest() require either fields as positional "
+                "arguments or 'get_latest_by' in the model's Meta."
+            )
+        obj = self._chain()
+        obj.query.set_limits(high=1)
+        obj.query.clear_ordering(force=True)
+        obj.query.add_ordering(*order_by)
+        return await obj.aget()
+
+    @from_codegen
     def earliest(self, *fields):
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.earliest)(*fields)
         if self.query.is_sliced:
             raise TypeError("Cannot change a query once a slice has been taken.")
         return self._earliest(*fields)
 
+    @generate_unasynced()
     async def aearliest(self, *fields):
-        return await sync_to_async(self.earliest)(*fields)
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.earliest)(*fields)
+        if self.query.is_sliced:
+            raise TypeError("Cannot change a query once a slice has been taken.")
+        return await self._aearliest(*fields)
 
+    @from_codegen
     def latest(self, *fields):
         """
         Return the latest object according to fields (if given) or by the
         model's Meta.get_latest_by.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.latest)(*fields)
         if self.query.is_sliced:
             raise TypeError("Cannot change a query once a slice has been taken.")
         return self.reverse()._earliest(*fields)
 
+    @generate_unasynced()
     async def alatest(self, *fields):
-        return await sync_to_async(self.latest)(*fields)
+        """
+        Return the latest object according to fields (if given) or by the
+        model's Meta.get_latest_by.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.latest)(*fields)
+        if self.query.is_sliced:
+            raise TypeError("Cannot change a query once a slice has been taken.")
+        return await self.reverse()._aearliest(*fields)
 
     def first(self):
         """Return the first object of a query or None if no match is found."""
