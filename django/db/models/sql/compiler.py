@@ -2160,7 +2160,89 @@ class SQLInsertCompiler(SQLCompiler):
 
         return placeholder_rows, param_rows
 
+    @from_codegen
     def as_sql(self):
+        # We don't need quote_name_unless_alias() here, since these are all
+        # going to be column names (so we can avoid the extra overhead).
+        qn = self.connection.ops.quote_name
+        opts = self.query.get_meta()
+        insert_statement = self.connection.ops.insert_statement(
+            on_conflict=self.query.on_conflict,
+        )
+        result = ["%s %s" % (insert_statement, qn(opts.db_table))]
+        fields = self.query.fields or [opts.pk]
+        result.append("(%s)" % ", ".join(qn(f.column) for f in fields))
+
+        if self.query.fields:
+            value_rows = [
+                [
+                    self.prepare_value(field, self.pre_save_val(field, obj))
+                    for field in fields
+                ]
+                for obj in self.query.objs
+            ]
+        else:
+            # An empty object.
+            value_rows = [
+                [self.connection.ops.pk_default_value()] for _ in self.query.objs
+            ]
+            fields = [None]
+
+        # Currently the backends just accept values when generating bulk
+        # queries and generate their own placeholders. Doing that isn't
+        # necessary and it should be possible to use placeholders and
+        # expressions in bulk inserts too.
+        can_bulk = (
+            not self.returning_fields and self.connection.features.has_bulk_insert
+        )
+
+        placeholder_rows, param_rows = self.assemble_as_sql(fields, value_rows)
+
+        on_conflict_suffix_sql = self.connection.ops.on_conflict_suffix_sql(
+            fields,
+            self.query.on_conflict,
+            (f.column for f in self.query.update_fields),
+            (f.column for f in self.query.unique_fields),
+        )
+        if (
+            self.returning_fields
+            and self.connection.features.can_return_columns_from_insert
+        ):
+            if self.connection.features.can_return_rows_from_bulk_insert:
+                result.append(
+                    self.connection.ops.bulk_insert_sql(fields, placeholder_rows)
+                )
+                params = param_rows
+            else:
+                result.append("VALUES (%s)" % ", ".join(placeholder_rows[0]))
+                params = [param_rows[0]]
+            if on_conflict_suffix_sql:
+                result.append(on_conflict_suffix_sql)
+            # Skip empty r_sql to allow subclasses to customize behavior for
+            # 3rd party backends. Refs #19096.
+            r_sql, self.returning_params = self.connection.ops.return_insert_columns(
+                self.returning_fields
+            )
+            if r_sql:
+                result.append(r_sql)
+                params += [self.returning_params]
+            return [(" ".join(result), tuple(chain.from_iterable(params)))]
+
+        if can_bulk:
+            result.append(self.connection.ops.bulk_insert_sql(fields, placeholder_rows))
+            if on_conflict_suffix_sql:
+                result.append(on_conflict_suffix_sql)
+            return [(" ".join(result), tuple(p for ps in param_rows for p in ps))]
+        else:
+            if on_conflict_suffix_sql:
+                result.append(on_conflict_suffix_sql)
+            return [
+                (" ".join(result + ["VALUES (%s)" % ", ".join(p)]), vals)
+                for p, vals in zip(placeholder_rows, param_rows)
+            ]
+
+    @generate_unasynced()
+    async def aas_sql(self):
         # We don't need quote_name_unless_alias() here, since these are all
         # going to be column names (so we can avoid the extra overhead).
         qn = self.connection.ops.quote_name
@@ -2374,7 +2456,33 @@ class SQLDeleteCompiler(SQLCompiler):
             return delete, ()
         return f"{delete} WHERE {where}", tuple(params)
 
+    @from_codegen
     def as_sql(self):
+        """
+        Create the SQL for this query. Return the SQL string and list of
+        parameters.
+        """
+        if self.single_alias and (
+            self.connection.features.delete_can_self_reference_subquery
+            or not self.contains_self_reference_subquery
+        ):
+            return self._as_sql(self.query)
+        innerq = self.query.clone()
+        innerq.__class__ = Query
+        innerq.clear_select_clause()
+        pk = self.query.model._meta.pk
+        innerq.select = [pk.get_col(self.query.get_initial_alias())]
+        outerq = Query(self.query.model)
+        if not self.connection.features.update_can_self_select:
+            # Force the materialization of the inner query to allow reference
+            # to the target table on MySQL.
+            sql, params = innerq.get_compiler(connection=self.connection).as_sql()
+            innerq = RawSQL("SELECT * FROM (%s) subquery" % sql, params)
+        outerq.add_filter("pk__in", innerq)
+        return self._as_sql(outerq)
+
+    @generate_unasynced()
+    async def aas_sql(self):
         """
         Create the SQL for this query. Return the SQL string and list of
         parameters.
@@ -2400,7 +2508,73 @@ class SQLDeleteCompiler(SQLCompiler):
 
 
 class SQLUpdateCompiler(SQLCompiler):
+    @from_codegen
     def as_sql(self):
+        """
+        Create the SQL for this query. Return the SQL string and list of
+        parameters.
+        """
+        self.pre_sql_setup()
+        if not self.query.values:
+            return "", ()
+        qn = self.quote_name_unless_alias
+        values, update_params = [], []
+        for field, model, val in self.query.values:
+            if hasattr(val, "resolve_expression"):
+                val = val.resolve_expression(
+                    self.query, allow_joins=False, for_save=True
+                )
+                if val.contains_aggregate:
+                    raise FieldError(
+                        "Aggregate functions are not allowed in this query "
+                        "(%s=%r)." % (field.name, val)
+                    )
+                if val.contains_over_clause:
+                    raise FieldError(
+                        "Window expressions are not allowed in this query "
+                        "(%s=%r)." % (field.name, val)
+                    )
+            elif hasattr(val, "prepare_database_save"):
+                if field.remote_field:
+                    val = val.prepare_database_save(field)
+                else:
+                    raise TypeError(
+                        "Tried to update field %s with a model instance, %r. "
+                        "Use a value compatible with %s."
+                        % (field, val, field.__class__.__name__)
+                    )
+            val = field.get_db_prep_save(val, connection=self.connection)
+
+            # Getting the placeholder for the field.
+            if hasattr(field, "get_placeholder"):
+                placeholder = field.get_placeholder(val, self, self.connection)
+            else:
+                placeholder = "%s"
+            name = field.column
+            if hasattr(val, "as_sql"):
+                sql, params = self.compile(val)
+                values.append("%s = %s" % (qn(name), placeholder % sql))
+                update_params.extend(params)
+            elif val is not None:
+                values.append("%s = %s" % (qn(name), placeholder))
+                update_params.append(val)
+            else:
+                values.append("%s = NULL" % qn(name))
+        table = self.query.base_table
+        result = [
+            "UPDATE %s SET" % qn(table),
+            ", ".join(values),
+        ]
+        try:
+            where, params = self.compile(self.query.where)
+        except FullResultSet:
+            params = []
+        else:
+            result.append("WHERE %s" % where)
+        return " ".join(result), tuple(update_params + params)
+
+    @generate_unasynced()
+    async def aas_sql(self):
         """
         Create the SQL for this query. Return the SQL string and list of
         parameters.
@@ -2579,7 +2753,33 @@ class SQLUpdateCompiler(SQLCompiler):
 
 
 class SQLAggregateCompiler(SQLCompiler):
+
+    @from_codegen
     def as_sql(self):
+        """
+        Create the SQL for this query. Return the SQL string and list of
+        parameters.
+        """
+        sql, params = [], []
+        for annotation in self.query.annotation_select.values():
+            ann_sql, ann_params = self.compile(annotation)
+            ann_sql, ann_params = annotation.select_format(self, ann_sql, ann_params)
+            sql.append(ann_sql)
+            params.extend(ann_params)
+        self.col_count = len(self.query.annotation_select)
+        sql = ", ".join(sql)
+        params = tuple(params)
+
+        inner_query_sql, inner_query_params = self.query.inner_query.get_compiler(
+            self.using,
+            elide_empty=self.elide_empty,
+        ).as_sql(with_col_aliases=True)
+        sql = "SELECT %s FROM (%s) subquery" % (sql, inner_query_sql)
+        params += inner_query_params
+        return sql, params
+
+    @generate_unasynced()
+    async def aas_sql(self):
         """
         Create the SQL for this query. Return the SQL string and list of
         parameters.
