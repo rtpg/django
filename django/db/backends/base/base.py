@@ -454,8 +454,8 @@ class BaseDatabaseWrapper:
 
     def acursor(self) -> utils.AsyncCursorCtx:
         """Create an async cursor, opening a connection if necessary."""
-        if ASYNC_TRUTH_MARKER:
-            self.validate_no_atomic_block()
+        # if ASYNC_TRUTH_MARKER:
+        #     self.validate_no_atomic_block()
         return self._acursor()
 
     @from_codegen
