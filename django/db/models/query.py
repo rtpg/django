@@ -1428,8 +1428,11 @@ class QuerySet(AltersData):
             raise TypeError("Cannot change a query once a slice has been taken.")
         return await self.reverse()._aearliest(*fields)
 
+    @from_codegen
     def first(self):
         """Return the first object of a query or None if no match is found."""
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.first)()
         if self.ordered:
             queryset = self
         else:
@@ -1438,11 +1441,24 @@ class QuerySet(AltersData):
         for obj in queryset[:1]:
             return obj
 
+    @generate_unasynced()
     async def afirst(self):
-        return await sync_to_async(self.first)()
+        """Return the first object of a query or None if no match is found."""
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.first)()
+        if self.ordered:
+            queryset = self
+        else:
+            self._check_ordering_first_last_queryset_aggregation(method="first")
+            queryset = self.order_by("pk")
+        async for obj in queryset[:1]:
+            return obj
 
+    @from_codegen
     def last(self):
         """Return the last object of a query or None if no match is found."""
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.last)()
         if self.ordered:
             queryset = self.reverse()
         else:
@@ -1451,14 +1467,30 @@ class QuerySet(AltersData):
         for obj in queryset[:1]:
             return obj
 
+    @generate_unasynced()
     async def alast(self):
-        return await sync_to_async(self.last)()
+        """Return the last object of a query or None if no match is found."""
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.last)()
+        if self.ordered:
+            queryset = self.reverse()
+        else:
+            self._check_ordering_first_last_queryset_aggregation(method="last")
+            queryset = self.order_by("-pk")
+        async for obj in queryset[:1]:
+            return obj
 
+    @from_codegen
     def in_bulk(self, id_list=None, *, field_name="pk"):
         """
         Return a dictionary mapping each of the given IDs to the object with
         that ID. If `id_list` isn't provided, evaluate the entire QuerySet.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.in_bulk)(
+                id_list=id_list,
+                field_name=field_name,
+            )
         if self.query.is_sliced:
             raise TypeError("Cannot use 'limit' or 'offset' with in_bulk().")
         if not issubclass(self._iterable_class, ModelIterable):
@@ -1498,11 +1530,55 @@ class QuerySet(AltersData):
             qs = self._chain()
         return {getattr(obj, field_name): obj for obj in qs}
 
+    @generate_unasynced()
     async def ain_bulk(self, id_list=None, *, field_name="pk"):
-        return await sync_to_async(self.in_bulk)(
-            id_list=id_list,
-            field_name=field_name,
-        )
+        """
+        Return a dictionary mapping each of the given IDs to the object with
+        that ID. If `id_list` isn't provided, evaluate the entire QuerySet.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.in_bulk)(
+                id_list=id_list,
+                field_name=field_name,
+            )
+        if self.query.is_sliced:
+            raise TypeError("Cannot use 'limit' or 'offset' with in_bulk().")
+        if not issubclass(self._iterable_class, ModelIterable):
+            raise TypeError("in_bulk() cannot be used with values() or values_list().")
+        opts = self.model._meta
+        unique_fields = [
+            constraint.fields[0]
+            for constraint in opts.total_unique_constraints
+            if len(constraint.fields) == 1
+        ]
+        if (
+            field_name != "pk"
+            and not opts.get_field(field_name).unique
+            and field_name not in unique_fields
+            and self.query.distinct_fields != (field_name,)
+        ):
+            raise ValueError(
+                "in_bulk()'s field_name must be a unique field but %r isn't."
+                % field_name
+            )
+        if id_list is not None:
+            if not id_list:
+                return {}
+            filter_key = "{}__in".format(field_name)
+            batch_size = connections[self.db].features.max_query_params
+            id_list = tuple(id_list)
+            # If the database has a limit on the number of query parameters
+            # (e.g. SQLite), retrieve objects in batches if necessary.
+            if batch_size and batch_size < len(id_list):
+                qs = ()
+                for offset in range(0, len(id_list), batch_size):
+                    batch = id_list[offset : offset + batch_size]
+                    qs += tuple(self.filter(**{filter_key: batch}))
+            else:
+                qs = self.filter(**{filter_key: id_list})
+        else:
+            qs = self._chain()
+        return {getattr(obj, field_name): obj async for obj in qs}
 
     def delete(self):
         """Delete the records in the current QuerySet."""
