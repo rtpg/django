@@ -1806,6 +1806,8 @@ class SQLCompiler:
             )
         else:
             # XXX wrong
+            # this is forcing evaluation of athing way to early
+            # instead of being an actual iterable
             if isinstance(results, AsyncGenerator):
                 results = [r for r in results]
         fields = [s[0] for s in self.select[0 : self.col_count]]
@@ -1834,6 +1836,8 @@ class SQLCompiler:
             )
         else:
             # XXX wrong
+            # this is forcing evaluation of athing way to early
+            # instead of being an actual iterable
             if isinstance(results, AsyncGenerator):
                 results = [r async for r in results]
         fields = [s[0] for s in self.select[0 : self.col_count]]

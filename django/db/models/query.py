@@ -57,7 +57,7 @@ class BaseIterable:
         # Generators don't actually start running until the first time you call
         # next() on them, so make the generator object in the async thread and
         # then repeatedly dispatch to it in a sync thread.
-        sync_generator = self.__iter__()
+        sync_generator = await sync_to_async(self.__iter__)()
 
         def next_slice(gen):
             return list(islice(gen, self.chunk_size))
@@ -80,7 +80,20 @@ class BaseIterable:
     # be added to each Iterable subclass, but that needs some work in the
     # Compiler first.
     def __aiter__(self):
-        return self._async_generator()
+        # not clear to me if we need this fallback, to investigate
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return self._sync_to_async_generator()
+        else:
+            return self._agenerator()
+
+    def __iter__(self):
+        return self._generator()
+
+    def _generator(self):
+        raise NotImplementedError()
+
+    def _agenerator(self):
+        raise NotImeplementedError()
 
 
 class ModelIterable(BaseIterable):
