@@ -1206,6 +1206,7 @@ class QuerySet(AltersData):
 
     aget_or_create.alters_data = True
 
+    @from_codegen
     def update_or_create(self, defaults=None, create_defaults=None, **kwargs):
         """
         Look up an object with the given kwargs, updating one with defaults
@@ -1215,6 +1216,12 @@ class QuerySet(AltersData):
         Return a tuple (object, created), where created is a boolean
         specifying whether an object was created.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.update_or_create)(
+                defaults=defaults,
+                create_defaults=create_defaults,
+                **kwargs,
+            )
         update_defaults = defaults or {}
         if create_defaults is None:
             create_defaults = update_defaults
@@ -1254,12 +1261,57 @@ class QuerySet(AltersData):
 
     update_or_create.alters_data = True
 
+    @generate_unasynced()
     async def aupdate_or_create(self, defaults=None, create_defaults=None, **kwargs):
-        return await sync_to_async(self.update_or_create)(
-            defaults=defaults,
-            create_defaults=create_defaults,
-            **kwargs,
-        )
+        """
+        Look up an object with the given kwargs, updating one with defaults
+        if it exists, otherwise create a new one. Optionally, an object can
+        be created with different values than defaults by using
+        create_defaults.
+        Return a tuple (object, created), where created is a boolean
+        specifying whether an object was created.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.update_or_create)(
+                defaults=defaults,
+                create_defaults=create_defaults,
+                **kwargs,
+            )
+        update_defaults = defaults or {}
+        if create_defaults is None:
+            create_defaults = update_defaults
+
+        self._for_write = True
+        async with transaction.atomic(using=self.db):
+            # Lock the row so that a concurrent update is blocked until
+            # update_or_create() has performed its save.
+            obj, created = await self.select_for_update().aget_or_create(
+                create_defaults, **kwargs
+            )
+            if created:
+                return obj, created
+            for k, v in resolve_callables(update_defaults):
+                setattr(obj, k, v)
+
+            update_fields = set(update_defaults)
+            concrete_field_names = self.model._meta._non_pk_concrete_field_names
+            # update_fields does not support non-concrete fields.
+            if concrete_field_names.issuperset(update_fields):
+                # Add fields which are set on pre_save(), e.g. auto_now fields.
+                # This is to maintain backward compatibility as these fields
+                # are not updated unless explicitly specified in the
+                # update_fields list.
+                for field in self.model._meta.local_concrete_fields:
+                    if not (
+                        field.primary_key or field.__class__.pre_save is Field.pre_save
+                    ):
+                        update_fields.add(field.name)
+                        if field.name != field.attname:
+                            update_fields.add(field.attname)
+                await obj.asave(using=self.db, update_fields=update_fields)
+            else:
+                await obj.asave(using=self.db)
+        return obj, False
 
     aupdate_or_create.alters_data = True
 
