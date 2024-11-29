@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import ContextDecorator, contextmanager
+from contextlib import ContextDecorator, asynccontextmanager, contextmanager
 import contextvars
 import weakref
 
@@ -109,6 +109,20 @@ def set_rollback(rollback, using=None):
     and data corruption may occur.
     """
     return get_connection(using).set_rollback(rollback)
+
+
+@asynccontextmanager
+async def amark_for_rollback_on_error(using=None):
+    # XXX port documentation
+    try:
+        yield
+    except Exception as exc:
+        # XXX locking
+        connection = await aget_connection(using)
+        if connection.in_atomic_block:
+            connection.needs_rollback = True
+            connection.rollback_exc = exc
+        raise
 
 
 @contextmanager

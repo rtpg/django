@@ -1580,8 +1580,11 @@ class QuerySet(AltersData):
             qs = self._chain()
         return {getattr(obj, field_name): obj async for obj in qs}
 
+    @from_codegen
     def delete(self):
         """Delete the records in the current QuerySet."""
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.delete)()
         self._not_support_combined_queries("delete")
         if self.query.is_sliced:
             raise TypeError("Cannot use 'limit' or 'offset' with delete().")
@@ -1610,15 +1613,46 @@ class QuerySet(AltersData):
         self._result_cache = None
         return num_deleted, num_deleted_per_model
 
+    @generate_unasynced()
+    async def adelete(self):
+        """Delete the records in the current QuerySet."""
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.delete)()
+        self._not_support_combined_queries("delete")
+        if self.query.is_sliced:
+            raise TypeError("Cannot use 'limit' or 'offset' with delete().")
+        if self.query.distinct_fields:
+            raise TypeError("Cannot call delete() after .distinct(*fields).")
+        if self._fields is not None:
+            raise TypeError("Cannot call delete() after .values() or .values_list()")
+
+        del_query = self._chain()
+
+        # The delete is actually 2 queries - one to find related objects,
+        # and one to delete. Make sure that the discovery of related
+        # objects is performed on the same database as the deletion.
+        del_query._for_write = True
+
+        # Disable non-supported fields.
+        del_query.query.select_for_update = False
+        del_query.query.select_related = False
+        del_query.query.clear_ordering(force=True)
+
+        collector = Collector(using=del_query.db, origin=self)
+        await collector.acollect(del_query)
+        num_deleted, num_deleted_per_model = await collector.adelete()
+
+        # Clear the result cache, in case this QuerySet gets reused.
+        self._result_cache = None
+        return num_deleted, num_deleted_per_model
+
     delete.alters_data = True
     delete.queryset_only = True
-
-    async def adelete(self):
-        return await sync_to_async(self.delete)()
 
     adelete.alters_data = True
     adelete.queryset_only = True
 
+    @from_codegen
     def _raw_delete(self, using):
         """
         Delete objects found from the given queryset in single direct SQL
@@ -1628,13 +1662,27 @@ class QuerySet(AltersData):
         query.__class__ = sql.DeleteQuery
         return query.get_compiler(using).execute_sql(ROW_COUNT)
 
-    _raw_delete.alters_data = True
+    @generate_unasynced()
+    async def _araw_delete(self, using):
+        """
+        Delete objects found from the given queryset in single direct SQL
+        query. No signals are sent and there is no protection for cascades.
+        """
+        query = self.query.clone()
+        query.__class__ = sql.DeleteQuery
+        return await query.aget_compiler(using).aexecute_sql(ROW_COUNT)
 
+    _raw_delete.alters_data = True
+    _araw_delete.alters_data = True
+
+    @from_codegen
     def update(self, **kwargs):
         """
         Update all elements in the current QuerySet, setting all the given
         fields to the appropriate values.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.update)(**kwargs)
         self._not_support_combined_queries("update")
         if self.query.is_sliced:
             raise TypeError("Cannot update a query once a slice has been taken.")
@@ -1664,15 +1712,54 @@ class QuerySet(AltersData):
 
         # Clear any annotations so that they won't be present in subqueries.
         query.annotations = {}
-        with transaction.mark_for_rollback_on_error(using=self.db):
+        with transaction.amark_for_rollback_on_error(using=self.db):
             rows = query.get_compiler(self.db).execute_sql(ROW_COUNT)
         self._result_cache = None
         return rows
 
-    update.alters_data = True
-
+    @generate_unasynced()
     async def aupdate(self, **kwargs):
-        return await sync_to_async(self.update)(**kwargs)
+        """
+        Update all elements in the current QuerySet, setting all the given
+        fields to the appropriate values.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.update)(**kwargs)
+        self._not_support_combined_queries("update")
+        if self.query.is_sliced:
+            raise TypeError("Cannot update a query once a slice has been taken.")
+        self._for_write = True
+        query = self.query.chain(sql.UpdateQuery)
+        query.add_update_values(kwargs)
+
+        # Inline annotations in order_by(), if possible.
+        new_order_by = []
+        for col in query.order_by:
+            alias = col
+            descending = False
+            if isinstance(alias, str) and alias.startswith("-"):
+                alias = alias.removeprefix("-")
+                descending = True
+            if annotation := query.annotations.get(alias):
+                if getattr(annotation, "contains_aggregate", False):
+                    raise exceptions.FieldError(
+                        f"Cannot update when ordering by an aggregate: {annotation}"
+                    )
+                if descending:
+                    annotation = annotation.desc()
+                new_order_by.append(annotation)
+            else:
+                new_order_by.append(col)
+        query.order_by = tuple(new_order_by)
+
+        # Clear any annotations so that they won't be present in subqueries.
+        query.annotations = {}
+        async with transaction.amark_for_rollback_on_error(using=self.db):
+            rows = await query.aget_compiler(self.db).aexecute_sql(ROW_COUNT)
+        self._result_cache = None
+        return rows
+
+    update.alters_data = True
 
     aupdate.alters_data = True
 
