@@ -16,6 +16,7 @@ from django.db import (
     DJANGO_VERSION_PICKLE_KEY,
     IntegrityError,
     NotSupportedError,
+    async_connections,
     connections,
     router,
     should_use_sync_fallback,
@@ -651,6 +652,7 @@ class QuerySet(AltersData):
             async for item in iterable:
                 yield item
 
+    @from_codegen
     def aggregate(self, *args, **kwargs):
         """
         Return a dictionary containing the calculations (aggregation)
@@ -659,6 +661,8 @@ class QuerySet(AltersData):
         If args is present the expression is passed as a kwarg using
         the Aggregate object's default alias.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.aggregate)(*args, **kwargs)
         if self.query.distinct_fields:
             raise NotImplementedError("aggregate() + distinct(fields) not implemented.")
         self._validate_values_are_expressions(
@@ -676,8 +680,33 @@ class QuerySet(AltersData):
 
         return self.query.chain().get_aggregation(self.db, kwargs)
 
+    @generate_unasynced()
     async def aaggregate(self, *args, **kwargs):
-        return await sync_to_async(self.aggregate)(*args, **kwargs)
+        """
+        Return a dictionary containing the calculations (aggregation)
+        over the current queryset.
+
+        If args is present the expression is passed as a kwarg using
+        the Aggregate object's default alias.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.aggregate)(*args, **kwargs)
+        if self.query.distinct_fields:
+            raise NotImplementedError("aggregate() + distinct(fields) not implemented.")
+        self._validate_values_are_expressions(
+            (*args, *kwargs.values()), method_name="aggregate"
+        )
+        for arg in args:
+            # The default_alias property raises TypeError if default_alias
+            # can't be set automatically or AttributeError if it isn't an
+            # attribute.
+            try:
+                arg.default_alias
+            except (AttributeError, TypeError):
+                raise TypeError("Complex aggregates require an alias")
+            kwargs[arg.default_alias] = arg
+
+        return await self.query.chain().aget_aggregation(self.db, kwargs)
 
     @from_codegen
     def count(self):
@@ -907,6 +936,7 @@ class QuerySet(AltersData):
             return OnConflict.UPDATE
         return None
 
+    @from_codegen
     def bulk_create(
         self,
         objs,
@@ -923,6 +953,15 @@ class QuerySet(AltersData):
         autoincrement field (except if features.can_return_rows_from_bulk_insert=True).
         Multi-table models are not supported.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.bulk_create)(
+                objs=objs,
+                batch_size=batch_size,
+                ignore_conflicts=ignore_conflicts,
+                update_conflicts=update_conflicts,
+                update_fields=update_fields,
+                unique_fields=unique_fields,
+            )
         # When you bulk insert you don't get the primary keys back (if it's an
         # autoincrement, except if can_return_rows_from_bulk_insert=True), so
         # you can't insert into the child tables which references this. There
@@ -1009,6 +1048,7 @@ class QuerySet(AltersData):
 
     bulk_create.alters_data = True
 
+    @generate_unasynced()
     async def abulk_create(
         self,
         objs,
@@ -1018,14 +1058,105 @@ class QuerySet(AltersData):
         update_fields=None,
         unique_fields=None,
     ):
-        return await sync_to_async(self.bulk_create)(
-            objs=objs,
-            batch_size=batch_size,
-            ignore_conflicts=ignore_conflicts,
-            update_conflicts=update_conflicts,
-            update_fields=update_fields,
-            unique_fields=unique_fields,
+        """
+        Insert each of the instances into the database. Do *not* call
+        save() on each of the instances, do not send any pre/post_save
+        signals, and do not set the primary key attribute if it is an
+        autoincrement field (except if features.can_return_rows_from_bulk_insert=True).
+        Multi-table models are not supported.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.bulk_create)(
+                objs=objs,
+                batch_size=batch_size,
+                ignore_conflicts=ignore_conflicts,
+                update_conflicts=update_conflicts,
+                update_fields=update_fields,
+                unique_fields=unique_fields,
+            )
+        # When you bulk insert you don't get the primary keys back (if it's an
+        # autoincrement, except if can_return_rows_from_bulk_insert=True), so
+        # you can't insert into the child tables which references this. There
+        # are two workarounds:
+        # 1) This could be implemented if you didn't have an autoincrement pk
+        # 2) You could do it by doing O(n) normal inserts into the parent
+        #    tables to get the primary keys back and then doing a single bulk
+        #    insert into the childmost table.
+        # We currently set the primary keys on the objects when using
+        # PostgreSQL via the RETURNING ID clause. It should be possible for
+        # Oracle as well, but the semantics for extracting the primary keys is
+        # trickier so it's not done yet.
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("Batch size must be a positive integer.")
+        # Check that the parents share the same concrete model with the our
+        # model to detect the inheritance pattern ConcreteGrandParent ->
+        # MultiTableParent -> ProxyChild. Simply checking self.model._meta.proxy
+        # would not identify that case as involving multiple tables.
+        for parent in self.model._meta.all_parents:
+            if parent._meta.concrete_model is not self.model._meta.concrete_model:
+                raise ValueError("Can't bulk create a multi-table inherited model")
+        if not objs:
+            return objs
+        opts = self.model._meta
+        if unique_fields:
+            # Primary key is allowed in unique_fields.
+            unique_fields = [
+                self.model._meta.get_field(opts.pk.name if name == "pk" else name)
+                for name in unique_fields
+            ]
+        if update_fields:
+            update_fields = [self.model._meta.get_field(name) for name in update_fields]
+        on_conflict = self._check_bulk_create_options(
+            ignore_conflicts,
+            update_conflicts,
+            update_fields,
+            unique_fields,
         )
+        self._for_write = True
+        fields = [f for f in opts.concrete_fields if not f.generated]
+        objs = list(objs)
+        self._prepare_for_bulk_create(objs)
+        async with transaction.atomic(using=self.db, savepoint=False):
+            objs_without_pk, objs_with_pk = partition(lambda o: o._is_pk_set(), objs)
+            if objs_with_pk:
+                returned_columns = await self._abatched_insert(
+                    objs_with_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+                for obj_with_pk, results in zip(objs_with_pk, returned_columns):
+                    for result, field in zip(results, opts.db_returning_fields):
+                        if field != opts.pk:
+                            setattr(obj_with_pk, field.attname, result)
+                for obj_with_pk in objs_with_pk:
+                    obj_with_pk._state.adding = False
+                    obj_with_pk._state.db = self.db
+            if objs_without_pk:
+                fields = [f for f in fields if not isinstance(f, AutoField)]
+                returned_columns = await self._abatched_insert(
+                    objs_without_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+                connection = connections[self.db]
+                if (
+                    connection.features.can_return_rows_from_bulk_insert
+                    and on_conflict is None
+                ):
+                    assert len(returned_columns) == len(objs_without_pk)
+                for obj_without_pk, results in zip(objs_without_pk, returned_columns):
+                    for result, field in zip(results, opts.db_returning_fields):
+                        setattr(obj_without_pk, field.attname, result)
+                    obj_without_pk._state.adding = False
+                    obj_without_pk._state.db = self.db
+
+        return objs
 
     abulk_create.alters_data = True
 
@@ -2418,6 +2549,7 @@ class QuerySet(AltersData):
     _ainsert.alters_data = True
     _ainsert.queryset_only = False
 
+    @from_codegen
     def _batched_insert(
         self,
         objs,
@@ -2453,6 +2585,54 @@ class QuerySet(AltersData):
                 )
             else:
                 self._insert(
+                    item,
+                    fields=fields,
+                    using=self.db,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+        return inserted_rows
+
+    @generate_unasynced()
+    async def _abatched_insert(
+        self,
+        objs,
+        fields,
+        batch_size,
+        on_conflict=None,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        """
+        Helper method for bulk_create() to insert objs one batch at a time.
+        """
+        if ASYNC_TRUTH_MARKER:
+            connection = async_connections.get_connection(self.db)
+        else:
+            connection = connections[self.db]
+        ops = connection.ops
+        max_batch_size = max(ops.bulk_batch_size(fields, objs), 1)
+        batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size
+        inserted_rows = []
+        bulk_return = connection.features.can_return_rows_from_bulk_insert
+        for item in [objs[i : i + batch_size] for i in range(0, len(objs), batch_size)]:
+            if bulk_return and (
+                on_conflict is None or on_conflict == OnConflict.UPDATE
+            ):
+                inserted_rows.extend(
+                    await self._ainsert(
+                        item,
+                        fields=fields,
+                        using=self.db,
+                        on_conflict=on_conflict,
+                        update_fields=update_fields,
+                        unique_fields=unique_fields,
+                        returning_fields=self.model._meta.db_returning_fields,
+                    )
+                )
+            else:
+                await self._ainsert(
                     item,
                     fields=fields,
                     using=self.db,
