@@ -1955,11 +1955,14 @@ class QuerySet(AltersData):
             return await self.query.ahas_results(using=self.db)
         return bool(self._result_cache)
 
+    @from_codegen
     def contains(self, obj):
         """
         Return True if the QuerySet contains the provided obj,
         False otherwise.
         """
+        if should_use_sync_fallback(False):
+            return sync_to_async(self.contains)(obj=obj)
         self._not_support_combined_queries("contains")
         if self._fields is not None:
             raise TypeError(
@@ -1976,8 +1979,29 @@ class QuerySet(AltersData):
             return obj in self._result_cache
         return self.filter(pk=obj.pk).exists()
 
+    @generate_unasynced()
     async def acontains(self, obj):
-        return await sync_to_async(self.contains)(obj=obj)
+        """
+        Return True if the QuerySet contains the provided obj,
+        False otherwise.
+        """
+        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+            return await sync_to_async(self.contains)(obj=obj)
+        self._not_support_combined_queries("contains")
+        if self._fields is not None:
+            raise TypeError(
+                "Cannot call QuerySet.contains() after .values() or .values_list()."
+            )
+        try:
+            if obj._meta.concrete_model != self.model._meta.concrete_model:
+                return False
+        except AttributeError:
+            raise TypeError("'obj' must be a model instance.")
+        if not obj._is_pk_set():
+            raise ValueError("QuerySet.contains() cannot be used on unsaved objects.")
+        if self._result_cache is not None:
+            return obj in self._result_cache
+        return await self.filter(pk=obj.pk).aexists()
 
     def _prefetch_related_objects(self):
         # This method can only be called once the result cache has been filled.
