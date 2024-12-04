@@ -86,3 +86,10 @@ class XorLookupsTests(TestCase):
             Number.objects.filter(Q(pk__in=[]) ^ Q(num__gte=5)),
             self.numbers[5:],
         )
+
+    def test_empty_shortcircuit(self):
+        # test that when working with EmptyQuerySet instances, that we shortcircuit
+        # by returning the original QS
+        qs1 = Number.objects.filter(num__gte=3)
+        self.assertIs(Number.objects.none() ^ qs1, qs1)
+        self.assertIs(qs1 ^ Number.objects.none(), qs1)
