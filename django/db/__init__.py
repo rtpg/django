@@ -66,22 +66,34 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def allow_commits():
-    old_value = getattr(commit_allowed, "value", False)
-    commit_allowed.value = True
+def set_async_db_commit_permission(perm):
+    old_value = getattr(commit_allowed, "value", True)
+    commit_allowed.value = perm
     try:
         yield
     finally:
         commit_allowed.value = old_value
 
 
+@contextmanager
+def allow_async_db_commits():
+    with set_async_db_commit_permission(True):
+        yield
+
+
+@contextmanager
+def block_async_db_commits():
+    with set_async_db_commit_permission(False):
+        yield
+
+
 def is_commit_allowed():
     try:
         return commit_allowed.value
     except:
-        # XXX mess
-        commit_allowed.value = False
-        return False
+        # XXX making sure its set
+        commit_allowed.value = True
+        return True
 
 
 class new_connection:
@@ -95,7 +107,7 @@ class new_connection:
         if not force_rollback and not is_commit_allowed():
             # this is for just figuring everything out
             raise ValueError(
-                "Commits are not allowed unless in an allow_commits() context"
+                "Commits are currently blocked, use allow_async_db_commits to unblock"
             )
         self.force_rollback = force_rollback
 

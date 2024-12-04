@@ -8,7 +8,7 @@ from django.db import (
     Error,
     IntegrityError,
     OperationalError,
-    allow_commits,
+    allow_async_db_commits,
     connection,
     new_connection,
     transaction,
@@ -587,7 +587,7 @@ class AsyncTransactionTestCase(TransactionTestCase):
     available_apps = ["transactions"]
 
     async def test_new_connection_nested(self):
-        with allow_commits():
+        with allow_async_db_commits():
             async with new_connection() as connection:
                 async with new_connection() as connection2:
                     await connection2.aset_autocommit(False)
@@ -608,7 +608,7 @@ class AsyncTransactionTestCase(TransactionTestCase):
                     assert len(result) == 1
 
     async def test_new_connection_nested2(self):
-        with allow_commits():
+        with allow_async_db_commits():
             async with new_connection() as connection:
                 await connection.aset_autocommit(False)
                 async with connection.acursor() as cursor:
@@ -630,7 +630,7 @@ class AsyncTransactionTestCase(TransactionTestCase):
                         self.assertEqual(result, [])
 
     async def test_new_connection_nested3(self):
-        with allow_commits():
+        with allow_async_db_commits():
             async with new_connection() as connection:
                 async with new_connection() as connection2:
                     await connection2.aset_autocommit(False)
