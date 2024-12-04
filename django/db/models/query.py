@@ -674,8 +674,6 @@ class QuerySet(AltersData):
         If args is present the expression is passed as a kwarg using
         the Aggregate object's default alias.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.aggregate)(*args, **kwargs)
         if self.query.distinct_fields:
             raise NotImplementedError("aggregate() + distinct(fields) not implemented.")
         self._validate_values_are_expressions(
@@ -702,8 +700,9 @@ class QuerySet(AltersData):
         If args is present the expression is passed as a kwarg using
         the Aggregate object's default alias.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.aggregate)(*args, **kwargs)
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.aggregate)(*args, **kwargs)
         if self.query.distinct_fields:
             raise NotImplementedError("aggregate() + distinct(fields) not implemented.")
         self._validate_values_are_expressions(
@@ -829,6 +828,8 @@ class QuerySet(AltersData):
             )
         )
 
+    create.alters_data = True
+
     @from_codegen
     def create(self, **kwargs):
         """
@@ -848,8 +849,6 @@ class QuerySet(AltersData):
         self._for_write = True
         obj.save(force_insert=True, using=self.db)
         return obj
-
-    create.alters_data = True
 
     @generate_unasynced()
     async def acreate(self, **kwargs):
@@ -949,6 +948,8 @@ class QuerySet(AltersData):
             return OnConflict.UPDATE
         return None
 
+    bulk_create.alters_data = True
+
     @from_codegen
     def bulk_create(
         self,
@@ -966,15 +967,6 @@ class QuerySet(AltersData):
         autoincrement field (except if features.can_return_rows_from_bulk_insert=True).
         Multi-table models are not supported.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.bulk_create)(
-                objs=objs,
-                batch_size=batch_size,
-                ignore_conflicts=ignore_conflicts,
-                update_conflicts=update_conflicts,
-                update_fields=update_fields,
-                unique_fields=unique_fields,
-            )
         # When you bulk insert you don't get the primary keys back (if it's an
         # autoincrement, except if can_return_rows_from_bulk_insert=True), so
         # you can't insert into the child tables which references this. There
@@ -1059,8 +1051,6 @@ class QuerySet(AltersData):
 
         return objs
 
-    bulk_create.alters_data = True
-
     @generate_unasynced()
     async def abulk_create(
         self,
@@ -1078,15 +1068,16 @@ class QuerySet(AltersData):
         autoincrement field (except if features.can_return_rows_from_bulk_insert=True).
         Multi-table models are not supported.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.bulk_create)(
-                objs=objs,
-                batch_size=batch_size,
-                ignore_conflicts=ignore_conflicts,
-                update_conflicts=update_conflicts,
-                update_fields=update_fields,
-                unique_fields=unique_fields,
-            )
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.bulk_create)(
+                    objs=objs,
+                    batch_size=batch_size,
+                    ignore_conflicts=ignore_conflicts,
+                    update_conflicts=update_conflicts,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
         # When you bulk insert you don't get the primary keys back (if it's an
         # autoincrement, except if can_return_rows_from_bulk_insert=True), so
         # you can't insert into the child tables which references this. There
@@ -1294,6 +1285,8 @@ class QuerySet(AltersData):
     bulk_update.alters_data = True
     abulk_update.alters_data = True
 
+    get_or_create.alters_data = True
+
     @from_codegen
     def get_or_create(self, defaults=None, **kwargs):
         """
@@ -1319,8 +1312,6 @@ class QuerySet(AltersData):
                 except self.model.DoesNotExist:
                     pass
                 raise
-
-    get_or_create.alters_data = True
 
     @generate_unasynced()
     async def aget_or_create(self, defaults=None, **kwargs):
@@ -1350,6 +1341,8 @@ class QuerySet(AltersData):
 
     aget_or_create.alters_data = True
 
+    update_or_create.alters_data = True
+
     @from_codegen
     def update_or_create(self, defaults=None, create_defaults=None, **kwargs):
         """
@@ -1360,12 +1353,6 @@ class QuerySet(AltersData):
         Return a tuple (object, created), where created is a boolean
         specifying whether an object was created.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.update_or_create)(
-                defaults=defaults,
-                create_defaults=create_defaults,
-                **kwargs,
-            )
         update_defaults = defaults or {}
         if create_defaults is None:
             create_defaults = update_defaults
@@ -1403,8 +1390,6 @@ class QuerySet(AltersData):
                 obj.save(using=self.db)
         return obj, False
 
-    update_or_create.alters_data = True
-
     @generate_unasynced()
     async def aupdate_or_create(self, defaults=None, create_defaults=None, **kwargs):
         """
@@ -1415,12 +1400,13 @@ class QuerySet(AltersData):
         Return a tuple (object, created), where created is a boolean
         specifying whether an object was created.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.update_or_create)(
-                defaults=defaults,
-                create_defaults=create_defaults,
-                **kwargs,
-            )
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.update_or_create)(
+                    defaults=defaults,
+                    create_defaults=create_defaults,
+                    **kwargs,
+                )
         update_defaults = defaults or {}
         if create_defaults is None:
             create_defaults = update_defaults
@@ -1534,16 +1520,15 @@ class QuerySet(AltersData):
 
     @from_codegen
     def earliest(self, *fields):
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.earliest)(*fields)
         if self.query.is_sliced:
             raise TypeError("Cannot change a query once a slice has been taken.")
         return self._earliest(*fields)
 
     @generate_unasynced()
     async def aearliest(self, *fields):
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.earliest)(*fields)
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.earliest)(*fields)
         if self.query.is_sliced:
             raise TypeError("Cannot change a query once a slice has been taken.")
         return await self._aearliest(*fields)
@@ -1554,8 +1539,6 @@ class QuerySet(AltersData):
         Return the latest object according to fields (if given) or by the
         model's Meta.get_latest_by.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.latest)(*fields)
         if self.query.is_sliced:
             raise TypeError("Cannot change a query once a slice has been taken.")
         return self.reverse()._earliest(*fields)
@@ -1566,8 +1549,9 @@ class QuerySet(AltersData):
         Return the latest object according to fields (if given) or by the
         model's Meta.get_latest_by.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.latest)(*fields)
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.latest)(*fields)
         if self.query.is_sliced:
             raise TypeError("Cannot change a query once a slice has been taken.")
         return await self.reverse()._aearliest(*fields)
@@ -1575,8 +1559,6 @@ class QuerySet(AltersData):
     @from_codegen
     def first(self):
         """Return the first object of a query or None if no match is found."""
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.first)()
         if self.ordered:
             queryset = self
         else:
@@ -1588,8 +1570,9 @@ class QuerySet(AltersData):
     @generate_unasynced()
     async def afirst(self):
         """Return the first object of a query or None if no match is found."""
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.first)()
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.first)()
         if self.ordered:
             queryset = self
         else:
@@ -1601,8 +1584,6 @@ class QuerySet(AltersData):
     @from_codegen
     def last(self):
         """Return the last object of a query or None if no match is found."""
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.last)()
         if self.ordered:
             queryset = self.reverse()
         else:
@@ -1614,8 +1595,9 @@ class QuerySet(AltersData):
     @generate_unasynced()
     async def alast(self):
         """Return the last object of a query or None if no match is found."""
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.last)()
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.last)()
         if self.ordered:
             queryset = self.reverse()
         else:
@@ -1630,11 +1612,6 @@ class QuerySet(AltersData):
         Return a dictionary mapping each of the given IDs to the object with
         that ID. If `id_list` isn't provided, evaluate the entire QuerySet.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.in_bulk)(
-                id_list=id_list,
-                field_name=field_name,
-            )
         if self.query.is_sliced:
             raise TypeError("Cannot use 'limit' or 'offset' with in_bulk().")
         if not issubclass(self._iterable_class, ModelIterable):
@@ -1680,11 +1657,12 @@ class QuerySet(AltersData):
         Return a dictionary mapping each of the given IDs to the object with
         that ID. If `id_list` isn't provided, evaluate the entire QuerySet.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.in_bulk)(
-                id_list=id_list,
-                field_name=field_name,
-            )
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.in_bulk)(
+                    id_list=id_list,
+                    field_name=field_name,
+                )
         if self.query.is_sliced:
             raise TypeError("Cannot use 'limit' or 'offset' with in_bulk().")
         if not issubclass(self._iterable_class, ModelIterable):
@@ -1727,8 +1705,6 @@ class QuerySet(AltersData):
     @from_codegen
     def delete(self):
         """Delete the records in the current QuerySet."""
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.delete)()
         self._not_support_combined_queries("delete")
         if self.query.is_sliced:
             raise TypeError("Cannot use 'limit' or 'offset' with delete().")
@@ -1760,8 +1736,9 @@ class QuerySet(AltersData):
     @generate_unasynced()
     async def adelete(self):
         """Delete the records in the current QuerySet."""
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.delete)()
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.delete)()
         self._not_support_combined_queries("delete")
         if self.query.is_sliced:
             raise TypeError("Cannot use 'limit' or 'offset' with delete().")
@@ -1825,8 +1802,6 @@ class QuerySet(AltersData):
         Update all elements in the current QuerySet, setting all the given
         fields to the appropriate values.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.update)(**kwargs)
         self._not_support_combined_queries("update")
         if self.query.is_sliced:
             raise TypeError("Cannot update a query once a slice has been taken.")
@@ -1867,8 +1842,9 @@ class QuerySet(AltersData):
         Update all elements in the current QuerySet, setting all the given
         fields to the appropriate values.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.update)(**kwargs)
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.update)(**kwargs)
         self._not_support_combined_queries("update")
         if self.query.is_sliced:
             raise TypeError("Cannot update a query once a slice has been taken.")
@@ -1951,8 +1927,6 @@ class QuerySet(AltersData):
         """
         Return True if the QuerySet would have any results, False otherwise.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.exists)()
         if self._result_cache is None:
             return self.query.has_results(using=self.db)
         return bool(self._result_cache)
@@ -1962,8 +1936,9 @@ class QuerySet(AltersData):
         """
         Return True if the QuerySet would have any results, False otherwise.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.exists)()
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.exists)()
         if self._result_cache is None:
             return await self.query.ahas_results(using=self.db)
         return bool(self._result_cache)
@@ -1974,8 +1949,6 @@ class QuerySet(AltersData):
         Return True if the QuerySet contains the provided obj,
         False otherwise.
         """
-        if should_use_sync_fallback(False):
-            return sync_to_async(self.contains)(obj=obj)
         self._not_support_combined_queries("contains")
         if self._fields is not None:
             raise TypeError(
@@ -1998,8 +1971,9 @@ class QuerySet(AltersData):
         Return True if the QuerySet contains the provided obj,
         False otherwise.
         """
-        if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
-            return await sync_to_async(self.contains)(obj=obj)
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.contains)(obj=obj)
         self._not_support_combined_queries("contains")
         if self._fields is not None:
             raise TypeError(
