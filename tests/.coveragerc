@@ -5,6 +5,7 @@ data_file = ${RUNTESTS_DIR-.}/.coverages/.coverage
 omit =
     */django/utils/autoreload.py
 source = django
+dynamic_context = test_function
 
 [report]
 ignore_errors = True
