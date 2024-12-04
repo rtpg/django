@@ -1989,7 +1989,7 @@ class SQLCompiler:
             await cursor.aclose()
             raise
 
-        if result_type == LEAK_CURSOR:
+        if result_type == CURSOR:
             # Give the caller the cursor to process and close.
             return cursor
         elif result_type == SINGLE:

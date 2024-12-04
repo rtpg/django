@@ -99,7 +99,7 @@ class LastExecutedQueryTest(TestCase):
             select={"föö": 1}
         )
         sql, params = data.query.sql_with_params()
-        with data.query.get_compiler("default").execute_sql(LEAK_CURSOR) as cursor:
+        with data.query.get_compiler("default").execute_sql(CURSOR) as cursor:
             last_sql = cursor.db.ops.last_executed_query(cursor, sql, params)
         self.assertIsInstance(last_sql, str)
 
@@ -116,9 +116,7 @@ class LastExecutedQueryTest(TestCase):
             Article.objects.filter(pk__in=list(range(20, 31))),
         ):
             sql, params = qs.query.sql_with_params()
-            with qs.query.get_compiler(DEFAULT_DB_ALIAS).execute_sql(
-                LEAK_CURSOR
-            ) as cursor:
+            with qs.query.get_compiler(DEFAULT_DB_ALIAS).execute_sql(CURSOR) as cursor:
                 self.assertEqual(
                     cursor.db.ops.last_executed_query(cursor, sql, params),
                     str(qs.query),

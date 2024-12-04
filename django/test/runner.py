@@ -994,10 +994,15 @@ class DiscoverRunner:
         # found or that couldn't be loaded due to syntax errors.
         test_types = (unittest.loader._FailedTest, *self.reorder_by)
         try:
-            with open("passed.tests", "r") as passed_tests_f:
-                passed_tests = {l.strip() for l in passed_tests_f.read().splitlines()}
+            if os.environ.get("STEPWISE"):
+                with open("passed.tests", "r") as passed_tests_f:
+                    passed_tests = {
+                        l.strip() for l in passed_tests_f.read().splitlines()
+                    }
+            else:
+                passed_tests = set()
         except FileNotFoundError:
-            passed_tests = {}
+            passed_tests = set()
 
         if len(passed_tests):
             print("Filtering out previously passing tests")
@@ -1118,8 +1123,8 @@ class DiscoverRunner:
 
     def _update_failed_tracking(self, result):
         if result.wasSuccessful():
-            print("Removed passed tests")
             try:
+                print("Removing passed tests")
                 os.remove("passed.tests")
             except FileNotFoundError:
                 pass
