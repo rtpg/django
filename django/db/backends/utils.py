@@ -15,10 +15,12 @@ from asgiref.local import Local
 
 logger = logging.getLogger("django.db.backends")
 
+# XXX experimentation
 sync_cursor_ops_local = Local()
 sync_cursor_ops_local.value = False
 
 
+# XXX experimentation
 class sync_cursor_ops_blocked:
     @classmethod
     def get(cls):
@@ -35,6 +37,7 @@ class sync_cursor_ops_blocked:
         sync_cursor_ops_local.value = v
 
 
+# XXX experimentation
 @contextmanager
 def block_sync_ops():
     old_val = sync_cursor_ops_blocked.get()
@@ -47,6 +50,7 @@ def block_sync_ops():
         print("Stopped blocking sync ops.")
 
 
+# XXX experimentation
 @contextmanager
 def unblock_sync_ops():
     old_val = sync_cursor_ops_blocked.get()
@@ -64,7 +68,9 @@ class CursorWrapper:
 
     WRAP_ERROR_ATTRS = frozenset(["fetchone", "fetchmany", "fetchall", "nextset"])
 
+    # XXX experimentation
     SYNC_BLOCK = {"close"}
+    # XXX experimentation
     SAFE_LIST = set()
     APPS_NOT_READY_WARNING_MSG = (
         "Accessing the database during app initialization is discouraged. To fix this "
@@ -73,6 +79,9 @@ class CursorWrapper:
     )
 
     def __getattr__(self, attr):
+        # XXX experimentation
+        # (the point here is being able to focus on a chunk of code in a specific
+        #  way to identify if something is unintentionally falling back to sync ops)
         if sync_cursor_ops_blocked.get():
             if attr in CursorWrapper.WRAP_ERROR_ATTRS:
                 raise ValueError("Sync operations blocked!")
