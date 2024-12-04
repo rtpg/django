@@ -828,8 +828,6 @@ class QuerySet(AltersData):
             )
         )
 
-    create.alters_data = True
-
     @from_codegen
     def create(self, **kwargs):
         """
@@ -947,8 +945,6 @@ class QuerySet(AltersData):
                     )
             return OnConflict.UPDATE
         return None
-
-    bulk_create.alters_data = True
 
     @from_codegen
     def bulk_create(
@@ -1285,8 +1281,6 @@ class QuerySet(AltersData):
     bulk_update.alters_data = True
     abulk_update.alters_data = True
 
-    get_or_create.alters_data = True
-
     @from_codegen
     def get_or_create(self, defaults=None, **kwargs):
         """
@@ -1339,9 +1333,8 @@ class QuerySet(AltersData):
                     pass
                 raise
 
+    get_or_create.alters_data = True
     aget_or_create.alters_data = True
-
-    update_or_create.alters_data = True
 
     @from_codegen
     def update_or_create(self, defaults=None, create_defaults=None, **kwargs):
@@ -1443,6 +1436,7 @@ class QuerySet(AltersData):
                 await obj.asave(using=self.db)
         return obj, False
 
+    update_or_create.alters_data = True
     aupdate_or_create.alters_data = True
 
     def _extract_model_params(self, defaults, **kwargs):
