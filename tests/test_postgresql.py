@@ -30,12 +30,12 @@ from django.dispatch import receiver
 
 def set_sync_timeout(connection):
     with connection.cursor() as cursor:
-        cursor.execute("SET statement_timeout to 10000;")
+        cursor.execute("SET statement_timeout to 100000;")
 
 
 async def set_async_timeout(connection):
     async with connection.acursor() as cursor:
-        await cursor.aexecute("SET statement_timeout to 10000;")
+        await cursor.aexecute("SET statement_timeout to 100000;")
 
 
 from asgiref.sync import sync_to_async
