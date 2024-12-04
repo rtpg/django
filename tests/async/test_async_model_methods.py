@@ -1,6 +1,6 @@
 from django.test import TestCase, TransactionTestCase
 
-from .models import SimpleModel
+from .models import ModelWithSyncOverride, SimpleModel
 from django.db import transaction, new_connection
 from asgiref.sync import async_to_sync
 
@@ -58,3 +58,30 @@ class AsyncModelOperationTest(TransactionTestCase):
             from_queryset=SimpleModel.objects.filter(field__gt=0)
         )
         self.assertEqual(self.s1.field, 20)
+
+
+class TestAsyncModelOverrides(TransactionTestCase):
+    def setUp(self):
+        super().setUp()
+        self.s1 = ModelWithSyncOverride.objects.create(field=5)
+
+    def test_sync_variant(self):
+        # when saving a ModelWithSyncOverride, we bump up the value of field
+        self.s1.field = 6
+        self.s1.save()
+        self.assertEqual(self.s1.field, 7)
+
+    async def test_override_handling_in_cxn_context(self):
+        # when saving with asave, we're actually going to fallback to save
+        # (including in a new_connection context)
+        async with new_connection(force_rollback=True):
+            self.s1.field = 6
+            await self.s1.asave()
+            self.assertEqual(self.s1.field, 7)
+
+    async def test_override_handling(self):
+        # when saving with asave, we're actually going to fallback to save
+        # (including outside a new_connection context)
+        self.s1.field = 6
+        await self.s1.asave()
+        self.assertEqual(self.s1.field, 7)
