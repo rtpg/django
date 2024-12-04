@@ -590,6 +590,12 @@ class Model(AltersData, metaclass=ModelBase):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+        # the following are pairings of sync and async variants of model methods
+        # if a subclass overrides one of these without overriding the other, then
+        # we should make the other one fallback to using the overriding one
+        #
+        # for example: if I override save, then asave should call into my overridden
+        # save, instead of the default asave (which does it's own thing)
         method_pairings = [
             ("save", "asave"),
         ]
@@ -599,11 +605,9 @@ class Model(AltersData, metaclass=ModelBase):
             async_defined = async_variant in cls.__dict__
             if sync_defined and not async_defined:
                 # async should fallback to sync
-                # print("Creating sync fallback")
                 setattr(cls, async_variant, sync_to_async(getattr(cls, sync_variant)))
             if not sync_defined and async_defined:
-                # sync should fallback to async!
-                # print("Creating async fallback")
+                # sync should fallback to async
                 setattr(cls, sync_variant, async_to_sync(getattr(cls, async_variant)))
 
     def __repr__(self):
@@ -1435,7 +1439,7 @@ class Model(AltersData, metaclass=ModelBase):
                 # this check, causing the subsequent UPDATE to return zero matching
                 # rows. The same result can occur in some rare cases when the
                 # database returns zero despite the UPDATE being executed
-                # successfully (a row is amatched and updated). In order to
+                # successfully (a row is matched and updated). In order to
                 # distinguish these two cases, the object's existence in the
                 # database is again checked for if the UPDATE query returns 0.
                 (filtered._update(values) > 0 or filtered.exists())
@@ -1466,7 +1470,7 @@ class Model(AltersData, metaclass=ModelBase):
                 # this check, causing the subsequent UPDATE to return zero matching
                 # rows. The same result can occur in some rare cases when the
                 # database returns zero despite the UPDATE being executed
-                # successfully (a row is amatched and updated). In order to
+                # successfully (a row is matched and updated). In order to
                 # distinguish these two cases, the object's existence in the
                 # database is again checked for if the UPDATE query returns 0.
                 (await filtered._aupdate(values) > 0 or (await filtered.aexists()))
