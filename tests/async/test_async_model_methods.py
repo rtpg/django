@@ -61,6 +61,8 @@ class AsyncModelOperationTest(TransactionTestCase):
 
 
 class TestAsyncModelOverrides(TransactionTestCase):
+    available_apps = ["async"]
+
     def setUp(self):
         super().setUp()
         self.s1 = ModelWithSyncOverride.objects.create(field=5)
