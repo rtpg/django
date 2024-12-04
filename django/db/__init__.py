@@ -90,8 +90,6 @@ class new_connection:
 
     """
 
-    BALANCE = 0
-
     def __init__(self, using=DEFAULT_DB_ALIAS, force_rollback=False):
         self.using = using
         if not force_rollback and not is_commit_allowed():
@@ -102,11 +100,8 @@ class new_connection:
         self.force_rollback = force_rollback
 
     async def __aenter__(self):
-        self.__class__.BALANCE += 1
         # XXX stupid nonsense
         modify_cxn_depth(lambda v: v + 1)
-        if "QL" in os.environ:
-            print(f"new_connection balance(__aenter__) {self.__class__.BALANCE}")
         conn = connections.create_connection(self.using)
         if conn.supports_async is False:
             raise NotSupportedError(
@@ -128,11 +123,8 @@ class new_connection:
         return self.conn
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        self.__class__.BALANCE -= 1
         # silly nonsense (again)
         modify_cxn_depth(lambda v: v - 1)
-        if "QL" in os.environ:
-            print(f"new_connection balance (__aexit__) {self.__class__.BALANCE}")
         autocommit = await self.conn.aget_autocommit()
         if autocommit is False:
             if exc_type is None and self.force_rollback is False:
