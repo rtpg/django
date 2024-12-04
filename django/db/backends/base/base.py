@@ -29,7 +29,6 @@ from django.utils.codegen import (
 
 NO_DB_ALIAS = "__no_db__"
 RAN_DB_VERSION_CHECK = set()
-LOG_CREATIONS = True
 
 logger = logging.getLogger("django.db.backends.base")
 
@@ -61,13 +60,6 @@ class BaseDatabaseWrapper:
     queries_limit = 9000
 
     def __init__(self, settings_dict, alias=DEFAULT_DB_ALIAS):
-        if LOG_CREATIONS and ("QL" in os.environ):
-            import traceback
-
-            print("CREATED DBWRAPPER FOR ", alias)
-            tb = "\n".join(traceback.format_stack())
-            if "connect_db_then_run" not in tb:
-                print(tb)
         # Connection related attributes.
         # The underlying database connection.
         self.connection = None

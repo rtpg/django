@@ -94,62 +94,9 @@ def _get_varchar_column(data):
     return "varchar(%(max_length)s)" % data
 
 
-# additions to make OTel instrumentation work properly
+# HACK additions to make OTel instrumentation work properly
 Database.AsyncConnection.pq = Database.pq
 Database.Connection.pq = Database.pq
-
-
-class ASCXN(Database.AsyncConnection):
-    LOG_CREATIONS = True
-    LOG_DELETIONS = True
-
-    def __init__(self, *args, **kwargs):
-        import traceback
-
-        self._creation_stack = traceback.format_stack()
-        super().__init__(*args, **kwargs)
-        if self.LOG_CREATIONS and ("QL" in os.environ):
-            print(f"CREATED ASCXN {self}")
-            # print("\n".join(self._creation_stack))
-
-    async def close(self):
-        if self.LOG_DELETIONS and ("QL" in os.environ):
-            print(f"CLOSING ASCXN {self}")
-        await super().close()
-
-    def __del__(self):
-        if self.LOG_DELETIONS and ("QL" in os.environ):
-            print("IN ASCXN.__DEL__")
-            # print("CREATION STACK WAS")
-            # print("\n".join(self._creation_stack))
-            # print("-------------------")
-        super().__del__()
-
-
-class SCXN(Database.Connection):
-    def __init__(self, *args, **kwargs):
-        import traceback
-
-        self._creation_stack = traceback.format_stack()
-        if LOG_CREATIONS:
-            print("CREATED SYNCCONNECTION")
-            print("\n".join(self._creation_stack))
-        super().__init__(*args, **kwargs)
-
-    def close(self):
-        if LOG_CREATIONS:
-            print("IN SCXN.CLOSE")
-            print("\n".join(traceback.format_stack()))
-        super().close()
-
-    def __del__(self):
-        if LOG_CREATIONS:
-            print("IN SCXN.__DEL__")
-            print(f"{self._closed=}")
-            print("CREATION STACK WAS")
-            print("\n".join(self._creation_stack))
-            print("-------------------")
-        super().__del__()
 
 
 class DatabaseWrapper(BaseDatabaseWrapper):
@@ -251,11 +198,6 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
     def __init__(self, *args, **kwargs):
         self._creation_stack = "\n".join(traceback.format_stack())
-        if "QL" in os.environ:
-            print(f"QQQ {id(self)} BDW OPEN")
-            print(">>>>")
-            print(self._creation_stack)
-            print("<<<<")
         super().__init__(*args, **kwargs)
 
     @property
@@ -483,7 +425,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             self.pool.open()
             connection = self.pool.getconn()
         else:
-            connection = SCXN.connect(**conn_params)
+            connection = Database.Connection.connect(**conn_params)
         if set_isolation_level:
             connection.isolation_level = isolation_level
         if not is_psycopg3:
@@ -503,8 +445,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             await self.apool.open()
             connection = await self.apool.getconn()
         else:
-            # connection = await self.Database.AsyncConnection.connect(**conn_params)
-            connection = await ASCXN.connect(**conn_params)
+            connection = await self.Database.AsyncConnection.connect(**conn_params)
         if set_isolation_level:
             connection.isolation_level = isolation_level
         return connection
@@ -848,16 +789,6 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
     def make_debug_cursor(self, cursor):
         return CursorDebugWrapper(cursor, self)
-
-    # def __del__(self):
-    #     print("CLOSING PG CONNECTION")
-    #     print("CREATION WAS AT")
-    #     print(self._creation_stack)
-    #     print("-------------------")
-    #     if self.connection:
-    #         print(f"{self.connection._closed=}")
-    #     if self.aconnection:
-    #         print(f"{self.aconnection._closed=}")
 
 
 if is_psycopg3:
