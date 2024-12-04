@@ -8,6 +8,7 @@ from django.db import (
     OperationalError,
     ProgrammingError,
     connection,
+    new_connection,
 )
 from django.db.models import FileField, Value
 from django.db.models.functions import Lower, Now
@@ -441,6 +442,12 @@ class BulkCreateTests(TestCase):
         msg = "Batch size must be a positive integer."
         with self.assertRaisesMessage(ValueError, msg):
             Country.objects.bulk_create([], batch_size=-1)
+
+    async def test_invalid_batch_size_exception_async(self):
+        msg = "Batch size must be a positive integer."
+        async with new_connection(force_rollback=True):
+            with self.assertRaisesMessage(ValueError, msg):
+                await Country.objects.abulk_create([], batch_size=-1)
 
     @skipIfDBFeature("supports_update_conflicts")
     def test_update_conflicts_unsupported(self):
