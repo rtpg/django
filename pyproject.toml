@@ -67,3 +67,6 @@ version = {attr = "django.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["django*"]
+
+[tool.pytest.ini_options]
+addopts = "-p no:django -p no:warnings"
