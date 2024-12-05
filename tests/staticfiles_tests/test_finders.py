@@ -14,7 +14,7 @@ DEPRECATION_MSG = (
 )
 
 
-class TestFinders:
+class FinderTestMixin:
     """
     Base finder test mixin.
 
@@ -77,7 +77,7 @@ class TestFinders:
             self.finder.find(src, wrong=1)
 
 
-class TestFileSystemFinder(TestFinders, StaticFilesTestCase):
+class TestFileSystemFinder(FinderTestMixin, StaticFilesTestCase):
     """
     Test FileSystemFinder.
     """
@@ -92,7 +92,7 @@ class TestFileSystemFinder(TestFinders, StaticFilesTestCase):
         self.find_all = (os.path.join("test", "file.txt"), [test_file_path])
 
 
-class TestAppDirectoriesFinder(TestFinders, StaticFilesTestCase):
+class TestAppDirectoriesFinder(FinderTestMixin, StaticFilesTestCase):
     """
     Test AppDirectoriesFinder.
     """
@@ -107,7 +107,7 @@ class TestAppDirectoriesFinder(TestFinders, StaticFilesTestCase):
         self.find_all = (os.path.join("test", "file1.txt"), [test_file_path])
 
 
-class TestDefaultStorageFinder(TestFinders, StaticFilesTestCase):
+class TestDefaultStorageFinder(FinderTestMixin, StaticFilesTestCase):
     """
     Test DefaultStorageFinder.
     """

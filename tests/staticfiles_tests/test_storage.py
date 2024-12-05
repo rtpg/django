@@ -25,7 +25,7 @@ def hashed_file_path(test, path):
     return fullpath.removeprefix(settings.STATIC_URL)
 
 
-class TestHashedFiles:
+class HashedFilesTestMixin:
     hashed_file_path = hashed_file_path
 
     def tearDown(self):
@@ -405,7 +405,7 @@ class TestExtraPatternsStorage(CollectionTestCase):
         },
     }
 )
-class TestCollectionManifestStorage(TestHashedFiles, CollectionTestCase):
+class TestCollectionManifestStorage(HashedFilesTestMixin, CollectionTestCase):
     """
     Tests for the Cache busting storage
     """

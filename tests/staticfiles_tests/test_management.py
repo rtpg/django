@@ -20,12 +20,12 @@ from django.test.utils import extend_sys_path
 from django.utils._os import symlinks_supported
 from django.utils.functional import empty
 
-from .cases import CollectionTestCase, StaticFilesTestCase, TestDefaults
+from .cases import CollectionTestCase, StaticFilesTestCase, DefaultTestsMixin
 from .settings import TEST_ROOT, TEST_SETTINGS
 from .storage import DummyStorage
 
 
-class TestNoFilesCreated:
+class NoFilesCreatedTestMixin:
     def test_no_files_created(self):
         """
         Make sure no files were create in the destination directory.
@@ -54,7 +54,7 @@ class TestRunserver(StaticFilesTestCase):
             self.assertEqual(response.status_code, 404)
 
 
-class TestFindStatic(TestDefaults, CollectionTestCase):
+class TestFindStatic(DefaultTestsMixin, CollectionTestCase):
     """
     Test ``findstatic`` management command.
     """
@@ -201,7 +201,7 @@ class TestCollectionHelpSubcommand(AdminScriptTestCase):
         self.assertNoOutput(err)
 
 
-class TestCollection(TestDefaults, CollectionTestCase):
+class TestCollection(DefaultTestsMixin, CollectionTestCase):
     """
     Test ``collectstatic`` management command.
     """
@@ -379,7 +379,7 @@ class TestInteractiveMessages(CollectionTestCase):
                 call_command("collectstatic", interactive=True)
 
 
-class TestCollectionNoDefaultIgnore(TestDefaults, CollectionTestCase):
+class TestCollectionNoDefaultIgnore(DefaultTestsMixin, CollectionTestCase):
     """
     The ``--no-default-ignore`` option of the ``collectstatic`` management
     command.
@@ -415,7 +415,7 @@ class TestCollectionCustomIgnorePatterns(CollectionTestCase):
         self.assertFileNotFound(os.path.join("test", "vendor", "module.js"))
 
 
-class TestCollectionDryRun(TestNoFilesCreated, CollectionTestCase):
+class TestCollectionDryRun(NoFilesCreatedTestMixin, CollectionTestCase):
     """
     Test ``--dry-run`` option for ``collectstatic`` management command.
     """
@@ -557,7 +557,7 @@ class TestCollectionOverwriteWarning(CollectionTestCase):
         },
     }
 )
-class TestCollectionNonLocalStorage(TestNoFilesCreated, CollectionTestCase):
+class TestCollectionNonLocalStorage(NoFilesCreatedTestMixin, CollectionTestCase):
     """
     Tests for a Storage that implements get_modified_time() but not path()
     (#15035).
@@ -600,11 +600,11 @@ class TestCollectionNeverCopyStorage(CollectionTestCase):
 
 
 @unittest.skipUnless(symlinks_supported(), "Must be able to symlink to run this test.")
-class TestCollectionLinks(TestDefaults, CollectionTestCase):
+class TestCollectionLinks(DefaultTestsMixin, CollectionTestCase):
     """
     Test ``--link`` option for ``collectstatic`` management command.
 
-    Note that by inheriting ``TestDefaults`` we repeat all
+    Note that by inheriting ``DefaultTestsMixin`` we repeat all
     the standard file resolving tests here, to make sure using
     ``--link`` does not change the file-selection semantics.
     """

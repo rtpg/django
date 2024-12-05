@@ -98,7 +98,7 @@ class CollectionTestCase(BaseStaticFilesMixin, SimpleTestCase):
             return f.read()
 
 
-class TestDefaults:
+class DefaultTestsMixin:
     """
     A few standard test cases.
     """
