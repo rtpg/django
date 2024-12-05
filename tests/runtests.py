@@ -200,7 +200,7 @@ def get_filtered_test_modules(start_at, start_after, gis_enabled, test_labels=No
             yield test_module
 
 
-def setup_collect_tests(start_at, start_after, test_labels=None):
+def init_django_settings_for_tests():
     state = {
         "INSTALLED_APPS": settings.INSTALLED_APPS,
         "ROOT_URLCONF": getattr(settings, "ROOT_URLCONF", ""),
@@ -251,7 +251,11 @@ def setup_collect_tests(start_at, start_after, test_labels=None):
 
     # Load all the ALWAYS_INSTALLED_APPS.
     django.setup()
+    return state
 
+
+def setup_collect_tests(start_at, start_after, test_labels=None):
+    state = init_django_settings_for_tests()
     # This flag must be evaluated after django.setup() because otherwise it can
     # raise AppRegistryNotReady when running gis_tests in isolation on some
     # backends (e.g. PostGIS).
@@ -297,16 +301,7 @@ def setup_run_tests(verbosity, start_at, start_after, test_labels=None):
         start_at, start_after, test_labels=test_labels
     )
 
-    installed_apps = set(get_installed())
-    for app in get_apps_to_install(test_modules):
-        if app in installed_apps:
-            continue
-        if verbosity >= 2:
-            print(f"Importing application {app}")
-        settings.INSTALLED_APPS.append(app)
-        installed_apps.add(app)
-
-    apps.set_installed_apps(settings.INSTALLED_APPS)
+    insert_test_modules_to_installed_apps(test_modules, verbosity)
 
     # Force declaring available_apps in TransactionTestCase for faster tests.
     def no_available_apps(cls):
@@ -323,6 +318,19 @@ def setup_run_tests(verbosity, start_at, start_after, test_labels=None):
 
     test_labels = test_labels or test_modules
     return test_labels, state
+
+
+def insert_test_modules_to_installed_apps(test_modules, verbosity):
+    installed_apps = set(get_installed())
+    for app in get_apps_to_install(test_modules):
+        if app in installed_apps:
+            continue
+        if verbosity >= 2:
+            print(f"Importing application {app}")
+        settings.INSTALLED_APPS.append(app)
+        installed_apps.add(app)
+
+    apps.set_installed_apps(settings.INSTALLED_APPS)
 
 
 def teardown_run_tests(state):
