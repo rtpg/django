@@ -1,5 +1,7 @@
+import os
 import pickle
 from functools import wraps
+from unittest import skipIf
 
 from django.db import IntegrityError, connections, transaction
 from django.test import TestCase, skipUnlessDBFeature
@@ -19,6 +21,10 @@ class UnpicklableObject:
 
 
 class TestSimpleTestCase(SimpleTestCase):
+    @skipIf(
+        os.environ.get("PYTEST_VERSION") is not None,
+        "Pytest's unittest wrappers do not support pickling",
+    )
     def test_is_picklable_with_non_picklable_properties(self):
         """ParallelTestSuite requires that all TestCases are picklable."""
         self.non_picklable = lambda: 0
