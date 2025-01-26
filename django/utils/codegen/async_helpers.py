@@ -221,6 +221,22 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
             if isinstance(decorator.decorator, Name)
         ]
 
+    def calculate_new_name(self, old_name):
+        if old_name.startswith("test_async_"):
+            # test_async_foo -> test_foo
+            return old_name.replace("test_async_", "test_", 1)
+        if old_name.startswith("_a"):
+            # _ainsert -> _insert
+            return old_name.replace("_a", "_", 1)
+        if old_name.startswith("a"):
+            # aget -> get
+            return old_name[1:]
+        raise ValueError(
+            f"""
+            Unknown name replacement pasttern for {old_name}
+            """
+        )
+
     def leave_FunctionDef(self, original_node: FunctionDef, updated_node: FunctionDef):
         decorator_info = self.decorator_info(updated_node)
         # if we are looking at something that's already codegen, drop it
@@ -229,15 +245,9 @@ class UnasyncifyMethodCommand(VisitorBasedCodemodCommand):
             return cst.RemovalSentinel.REMOVE
 
         if decorator_info.unasync:
-            method_name = get_full_name_for_node(updated_node.name)
-            if method_name[0] != "a" and method_name[:2] != "_a":
-                raise ValueError(
-                    "Expected an async method with unasync codegen to start with 'a' or '_a'"
-                )
-            if method_name[0] == "a":
-                new_name = method_name[1:]
-            else:
-                new_name = "_" + method_name[2:]
+            new_name = self.calculate_new_name(
+                get_full_name_for_node(updated_node.name)
+            )
 
             unasynced_func = updated_node.with_changes(
                 name=Name(new_name),
