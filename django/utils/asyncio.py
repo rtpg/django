@@ -37,3 +37,13 @@ def async_unsafe(message):
         return decorator(func)
     else:
         return decorator
+
+
+async def alist(to_consume):
+    """
+    This helper method gets a list out of an async iterable
+    """
+    result = []
+    async for elt in to_consume:
+        result.append(elt)
+    return result
