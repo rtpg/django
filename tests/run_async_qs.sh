@@ -7,5 +7,5 @@ coverage combine
 # echo "Generating coverage for db/models/query.py..."
 # coverage html --include '**/db/models/query.py'
 echo "Generating coverage.."
-coverage html # --include '**/db/models/query.py'
+coverage html --show-contexts # --include '**/db/models/query.py'
 open coverage_html/index.html
