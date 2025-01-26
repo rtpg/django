@@ -213,34 +213,6 @@ class ModelInstanceCreationTests(TestCase):
         with self.assertNumQueries(1):
             PrimaryKeyWithFalseyDbDefault().save()
 
-    def test_save_positional_arguments(self):
-        a = Article.objects.create(headline="original", pub_date=datetime(2014, 5, 16))
-        a.headline = "changed"
-
-        a.save(False, False, None, ["pub_date"])
-        a.refresh_from_db()
-        self.assertEqual(a.headline, "original")
-
-        a.headline = "changed"
-        a.save(False, False, None, ["pub_date", "headline"])
-        a.refresh_from_db()
-        self.assertEqual(a.headline, "changed")
-
-    async def test_asave_positional_arguments(self):
-        a = await Article.objects.acreate(
-            headline="original", pub_date=datetime(2014, 5, 16)
-        )
-        a.headline = "changed"
-
-        await a.asave(False, False, None, ["pub_date"])
-        await a.arefresh_from_db()
-        self.assertEqual(a.headline, "original")
-
-        a.headline = "changed"
-        await a.asave(False, False, None, ["pub_date", "headline"])
-        await a.arefresh_from_db()
-        self.assertEqual(a.headline, "changed")
-
 
 class ModelTest(TestCase):
     def test_objects_attribute_is_only_available_on_the_class_itself(self):
