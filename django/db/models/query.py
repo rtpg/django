@@ -1988,9 +1988,18 @@ class QuerySet(AltersData):
             return obj in self._result_cache
         return await self.filter(pk=obj.pk).aexists()
 
+    @from_codegen
     def _prefetch_related_objects(self):
         # This method can only be called once the result cache has been filled.
         prefetch_related_objects(self._result_cache, *self._prefetch_related_lookups)
+        self._prefetch_done = True
+
+    @generate_unasynced()
+    async def _aprefetch_related_objects(self):
+        # This method can only be called once the result cache has been filled.
+        await aprefetch_related_objects(
+            self._result_cache, *self._prefetch_related_lookups
+        )
         self._prefetch_done = True
 
     def explain(self, *, format=None, **options):
@@ -2856,10 +2865,6 @@ class RawQuerySet:
         else:
             clone._prefetch_related_lookups = clone._prefetch_related_lookups + lookups
         return clone
-
-    def _prefetch_related_objects(self):
-        prefetch_related_objects(self._result_cache, *self._prefetch_related_lookups)
-        self._prefetch_done = True
 
     @from_codegen
     def _prefetch_related_objects(self):
