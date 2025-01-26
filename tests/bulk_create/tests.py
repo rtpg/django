@@ -49,23 +49,45 @@ class BulkCreateTests(TestCase):
             Country(name="Czech Republic", iso_two_letter="CZ"),
         ]
 
+    @from_codegen
     def test_simple(self):
-        created = Country.objects.bulk_create(self.data)
-        self.assertEqual(created, self.data)
-        self.assertQuerySetEqual(
-            Country.objects.order_by("-name"),
-            [
-                "United States of America",
-                "The Netherlands",
-                "Germany",
-                "Czech Republic",
-            ],
-            attrgetter("name"),
-        )
+        with new_connection(force_rollback=True):
+            created = Country.objects.bulk_create(self.data)
+            self.assertEqual(created, self.data)
 
-        created = Country.objects.bulk_create([])
-        self.assertEqual(created, [])
-        self.assertEqual(Country.objects.count(), 4)
+            self.assertListEqual(
+                [c.name for c in Country.objects.order_by("-name")],
+                [
+                    "United States of America",
+                    "The Netherlands",
+                    "Germany",
+                    "Czech Republic",
+                ],
+            )
+
+            created = Country.objects.bulk_create([])
+            self.assertEqual(created, [])
+            self.assertEqual(Country.objects.count(), 4)
+
+    @generate_unasynced()
+    async def test_async_simple(self):
+        async with new_connection(force_rollback=True):
+            created = await Country.objects.abulk_create(self.data)
+            self.assertEqual(created, self.data)
+
+            self.assertListEqual(
+                [c.name async for c in Country.objects.order_by("-name")],
+                [
+                    "United States of America",
+                    "The Netherlands",
+                    "Germany",
+                    "Czech Republic",
+                ],
+            )
+
+            created = await Country.objects.abulk_create([])
+            self.assertEqual(created, [])
+            self.assertEqual(await Country.objects.acount(), 4)
 
     @skipUnlessDBFeature("has_bulk_insert")
     def test_efficiency(self):
