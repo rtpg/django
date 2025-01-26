@@ -9,8 +9,12 @@ GET_ITERATOR_CHUNK_SIZE = 100
 # Namedtuples for sql.* internal use.
 
 # How many results to expect from a cursor.execute call
+# multiple rows are expected
 MULTI = "multi"
+# a single row is expected
 SINGLE = "single"
+# instead of returning the rows, return the row count
+CURSOR = "cursor"
 NO_RESULTS = "no results"
 # Rather than returning results, returns:
 CURSOR = "cursor"

@@ -2,6 +2,8 @@ import os
 from asyncio import get_running_loop
 from functools import wraps
 
+from asgiref.sync import async_to_sync, sync_to_async
+
 from django.core.exceptions import SynchronousOnlyOperation
 
 
@@ -37,3 +39,16 @@ def async_unsafe(message):
         return decorator(func)
     else:
         return decorator
+
+
+async def alist(to_consume):
+    """
+    This helper method gets a list out of an async iterable
+    """
+    result = []
+    async for elt in to_consume:
+        result.append(elt)
+    return result
+
+
+agetattr = sync_to_async(getattr)

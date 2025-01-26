@@ -4,31 +4,37 @@ from datetime import datetime
 
 from asgiref.sync import async_to_sync, sync_to_async
 
-from django.db import NotSupportedError, connection
+from django.db import NotSupportedError, connection, new_connection
 from django.db.models import Prefetch, Sum
-from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
+from django.test import (
+    TransactionTestCase,
+    TestCase,
+    skipIfDBFeature,
+    skipUnlessDBFeature,
+)
 
 from .models import RelatedModel, SimpleModel
 
 
-class AsyncQuerySetTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.s1 = SimpleModel.objects.create(
+class AsyncQuerySetTest(TransactionTestCase):
+    available_apps = ["async"]
+
+    def setUp(self):
+        self.s1 = SimpleModel.objects.create(
             field=1,
             created=datetime(2022, 1, 1, 0, 0, 0),
         )
-        cls.s2 = SimpleModel.objects.create(
+        self.s2 = SimpleModel.objects.create(
             field=2,
             created=datetime(2022, 1, 1, 0, 0, 1),
         )
-        cls.s3 = SimpleModel.objects.create(
+        self.s3 = SimpleModel.objects.create(
             field=3,
             created=datetime(2022, 1, 1, 0, 0, 2),
         )
-        cls.r1 = RelatedModel.objects.create(simple=cls.s1)
-        cls.r2 = RelatedModel.objects.create(simple=cls.s2)
-        cls.r3 = RelatedModel.objects.create(simple=cls.s3)
+        self.r1 = RelatedModel.objects.create(simple=self.s1)
+        self.r2 = RelatedModel.objects.create(simple=self.s2)
+        self.r3 = RelatedModel.objects.create(simple=self.s3)
 
     @staticmethod
     def _get_db_feature(connection_, feature_name):
@@ -88,6 +94,10 @@ class AsyncQuerySetTest(TestCase):
     async def test_aget(self):
         instance = await SimpleModel.objects.aget(field=1)
         self.assertEqual(instance, self.s1)
+        with self.assertRaises(SimpleModel.MultipleObjectsReturned):
+            await SimpleModel.objects.aget()
+        with self.assertRaises(SimpleModel.DoesNotExist):
+            await SimpleModel.objects.aget(field=98)
 
     async def test_acreate(self):
         await SimpleModel.objects.acreate(field=4)
@@ -115,17 +125,23 @@ class AsyncQuerySetTest(TestCase):
         self.assertIs(created, True)
         self.assertEqual(instance.field, 6)
 
-    @skipUnlessDBFeature("has_bulk_insert")
-    @async_to_sync
+    def ensure_feature(self, *args):
+        if not all(getattr(connection.features, feature, False) for feature in args):
+            self.skipTest(f"Database doesn't support feature(s): {', '.join(args)}")
+
+    def skip_if_feature(self, *args):
+        if any(getattr(connection.features, feature, False) for feature in args):
+            self.skipTest(f"Database supports feature(s): {', '.join(args)}")
+
     async def test_abulk_create(self):
+        self.ensure_feature("has_bulk_insert")
         instances = [SimpleModel(field=i) for i in range(10)]
         qs = await SimpleModel.objects.abulk_create(instances)
         self.assertEqual(len(qs), 10)
 
-    @skipUnlessDBFeature("has_bulk_insert", "supports_update_conflicts")
-    @skipIfDBFeature("supports_update_conflicts_with_target")
-    @async_to_sync
     async def test_update_conflicts_unique_field_unsupported(self):
+        self.ensure_feature("has_bulk_insert", "support_update_conflicts")
+        self.skip_if_feature("supports_update_conflicts_with_target")
         msg = (
             "This database backend does not support updating conflicts with specifying "
             "unique fields that can trigger the upsert."
@@ -223,9 +239,8 @@ class AsyncQuerySetTest(TestCase):
         qs = [o async for o in SimpleModel.objects.all()]
         self.assertCountEqual(qs, [self.s1, self.s3])
 
-    @skipUnlessDBFeature("supports_explaining_query_execution")
-    @async_to_sync
     async def test_aexplain(self):
+        self.ensure_feature("supports_explaining_query_execution")
         supported_formats = await sync_to_async(self._get_db_feature)(
             connection, "supported_explain_formats"
         )
@@ -257,3 +272,32 @@ class AsyncQuerySetTest(TestCase):
         sql = "SELECT id, field FROM async_simplemodel WHERE created=%s"
         qs = SimpleModel.objects.raw(sql, [self.s1.created])
         self.assertEqual([o async for o in qs], [self.s1])
+
+
+# for all the test methods on AsyncQuerySetTest
+# we will add a variant, that first opens a new
+# async connection
+
+
+def _tests():
+    return [(attr, getattr(AsyncQuerySetTest, attr)) for attr in dir(AsyncQuerySetTest)]
+
+
+def wrap_test(original_test, test_name):
+    """
+    Given an async test, provide an async test that
+    is generating a new connection
+    """
+    new_test_name = test_name + "_new_cxn"
+
+    async def wrapped_test(self):
+        async with new_connection(force_rollback=True):
+            await original_test(self)
+
+    wrapped_test.__name__ = new_test_name
+    return (new_test_name, wrapped_test)
+
+
+for test_name, test in _tests():
+    new_name, new_test = wrap_test(test, test_name)
+    setattr(AsyncQuerySetTest, new_name, new_test)

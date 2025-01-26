@@ -17,3 +17,13 @@ tests/.coverage*
 build/
 tests/report/
 tests/screenshots/
+
+.direnv
+
+*.sqlite3
+passed.tests
+
+.coverage
+.envrc
+uv.lock
+*.cobp

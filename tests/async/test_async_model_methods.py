@@ -1,18 +1,42 @@
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
-from .models import SimpleModel
+from .models import ModelWithSyncOverride, SimpleModel
+from django.db import transaction, new_connection
+from asgiref.sync import async_to_sync
 
 
-class AsyncModelOperationTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.s1 = SimpleModel.objects.create(field=0)
+# XXX should there be a way of catching this
+# class AsyncSyncCominglingTest(TransactionTestCase):
 
+#     available_apps = ["async"]
+
+#     async def change_model_with_async(self, obj):
+#         obj.field = 10
+#         await obj.asave()
+
+#     def test_transaction_async_comingling(self):
+#         with transaction.atomic():
+#             s1 = SimpleModel.objects.create(field=0)
+#             async_to_sync(self.change_model_with_async)(s1)
+
+
+class AsyncModelOperationTest(TransactionTestCase):
+
+    available_apps = ["async"]
+
+    def setUp(self):
+        super().setUp()
+        self.s1 = SimpleModel.objects.create(field=0)
+
+    @TestCase.use_async_connections
     async def test_asave(self):
-        self.s1.field = 10
-        await self.s1.asave()
-        refetched = await SimpleModel.objects.aget()
-        self.assertEqual(refetched.field, 10)
+        from django.db.backends.utils import block_sync_ops
+
+        with block_sync_ops():
+            self.s1.field = 10
+            await self.s1.asave()
+            refetched = await SimpleModel.objects.aget()
+            self.assertEqual(refetched.field, 10)
 
     async def test_adelete(self):
         await self.s1.adelete()
@@ -34,3 +58,32 @@ class AsyncModelOperationTest(TestCase):
             from_queryset=SimpleModel.objects.filter(field__gt=0)
         )
         self.assertEqual(self.s1.field, 20)
+
+
+class TestAsyncModelOverrides(TransactionTestCase):
+    available_apps = ["async"]
+
+    def setUp(self):
+        super().setUp()
+        self.s1 = ModelWithSyncOverride.objects.create(field=5)
+
+    def test_sync_variant(self):
+        # when saving a ModelWithSyncOverride, we bump up the value of field
+        self.s1.field = 6
+        self.s1.save()
+        self.assertEqual(self.s1.field, 7)
+
+    async def test_override_handling_in_cxn_context(self):
+        # when saving with asave, we're actually going to fallback to save
+        # (including in a new_connection context)
+        async with new_connection(force_rollback=True):
+            self.s1.field = 6
+            await self.s1.asave()
+            self.assertEqual(self.s1.field, 7)
+
+    async def test_override_handling(self):
+        # when saving with asave, we're actually going to fallback to save
+        # (including outside a new_connection context)
+        self.s1.field = 6
+        await self.s1.asave()
+        self.assertEqual(self.s1.field, 7)

@@ -7,14 +7,15 @@ from django.contrib.auth import (
 )
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, TestCase, override_settings
 from django.utils.deprecation import RemovedInDjango61Warning
 
 
-class AsyncAuthTest(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.test_user = User.objects.create_user(
+class AsyncAuthTest(TransactionTestCase):
+    available_apps = ["django.contrib.auth"]
+
+    def setUp(self):
+        self.test_user = User.objects.create_user(
             "testuser", "test@example.com", "testpw"
         )
 

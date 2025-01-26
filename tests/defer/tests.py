@@ -1,5 +1,10 @@
+from unittest import expectedFailure
+from unittest.case import skip
 from django.core.exceptions import FieldDoesNotExist, FieldError
+from django.db import new_connection
 from django.test import SimpleTestCase, TestCase
+from django.utils.asyncio import alist, agetattr
+from django.utils.codegen import from_codegen, generate_unasynced
 
 from .models import (
     BigChild,
@@ -231,6 +236,8 @@ class BigChildDeferTests(AssertionMixin, TestCase):
 
 
 class TestDefer2(AssertionMixin, TestCase):
+
+    @from_codegen
     def test_defer_proxy(self):
         """
         Ensure select_related together with only on a proxy model behaves
@@ -238,12 +245,33 @@ class TestDefer2(AssertionMixin, TestCase):
         """
         related = Secondary.objects.create(first="x1", second="x2")
         ChildProxy.objects.create(name="p1", value="xx", related=related)
-        children = ChildProxy.objects.select_related().only("id", "name")
+        children = list(ChildProxy.objects.select_related().only("id", "name"))
         self.assertEqual(len(children), 1)
         child = children[0]
         self.assert_delayed(child, 2)
         self.assertEqual(child.name, "p1")
         self.assertEqual(child.value, "xx")
+
+    # maybe there is actually no answer for attribute access in await contexts
+    # but that feels very weird to me
+    @skip("XXX Proxy object stuff is weird")
+    @generate_unasynced()
+    async def test_async_defer_proxy(self):
+        """
+        Ensure select_related together with only on a proxy model behaves
+        as expected. See #17876.
+        """
+        async with new_connection(force_rollback=True):
+            related = await Secondary.objects.acreate(first="x1", second="x2")
+            await ChildProxy.objects.acreate(name="p1", value="xx", related=related)
+            children = await alist(
+                ChildProxy.objects.select_related().only("id", "name")
+            )
+            self.assertEqual(len(children), 1)
+            child = children[0]
+            self.assert_delayed(child, 2)
+            self.assertEqual(await agetattr(child, "name"), "p1")
+            self.assertEqual(await agetattr(child, "value"), "xx")
 
     def test_defer_inheritance_pk_chaining(self):
         """

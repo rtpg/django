@@ -38,7 +38,13 @@ from django.core.management.color import no_style
 from django.core.management.sql import emit_post_migrate_signal
 from django.core.servers.basehttp import ThreadedWSGIServer, WSGIRequestHandler
 from django.core.signals import setting_changed
-from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction
+from django.db import (
+    DEFAULT_DB_ALIAS,
+    async_connections,
+    connection,
+    connections,
+    transaction,
+)
 from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
 from django.forms.fields import CharField
 from django.http import QueryDict
@@ -323,6 +329,56 @@ class SimpleTestCase(unittest.TestCase):
         debug_result = _DebugResult()
         self._setup_and_call(debug_result, debug=True)
 
+    def connect_db_then_run(self, test_method):
+
+        import functools
+        from contextlib import AsyncExitStack
+        from django.db import new_connection
+
+        @functools.wraps(test_method)
+        async def cdb_then_run(*args, **kwargs):
+            async with AsyncExitStack() as stack:
+                # connect to all the DBs
+                for db in self.databases:
+                    aconn = await stack.enter_async_context(new_connection(using=db))
+                    # import gc
+
+                    # refs = gc.get_referents(aconn)
+                    # print(refs)
+                    # import pdb
+
+                    # pdb.set_trace()
+                await test_method(*args, **kwargs)
+
+        return cdb_then_run
+
+    @classmethod
+    def use_async_connections(cls, test_method):
+        # set up async  connections that will get rollbacked at the
+        # end of the session
+        import functools
+        from contextlib import AsyncExitStack
+        from django.db import new_connection
+
+        @functools.wraps(test_method)
+        async def cdb_then_run(self, *args, **kwargs):
+            async with AsyncExitStack() as stack:
+                # connect to all the DBs
+                for db in self.databases:
+                    await stack.enter_async_context(
+                        new_connection(using=db, force_rollback=True)
+                    )
+                    # import gc
+
+                    # refs = gc.get_referents(aconn)
+                    # print(refs)
+                    # import pdb
+
+                    # pdb.set_trace()
+                await test_method(self, *args, **kwargs)
+
+        return cdb_then_run
+
     def _setup_and_call(self, result, debug=False):
         """
         Perform the following in order: pre-setup, run test, post-teardown,
@@ -336,9 +392,16 @@ class SimpleTestCase(unittest.TestCase):
             testMethod, "__unittest_skip__", False
         )
 
+        async_connections._from_testcase = True
+
         # Convert async test methods.
         if iscoroutinefunction(testMethod):
-            setattr(self, self._testMethodName, async_to_sync(testMethod))
+            setattr(
+                self,
+                self._testMethodName,
+                async_to_sync(testMethod),
+                # async_to_sync(self.connect_db_then_run(testMethod)),
+            )
 
         if not skipped:
             try:
@@ -1111,6 +1174,10 @@ class TransactionTestCase(SimpleTestCase):
         * If the class has a 'fixtures' attribute, install those fixtures.
         """
         super()._pre_setup()
+        if not hasattr(cls, "available_apps"):
+            raise Exception(
+                "Please define available_apps in TransactionTestCase and its subclasses."
+            )
         if cls.available_apps is not None:
             apps.set_available_apps(cls.available_apps)
             cls._available_apps_calls_balanced += 1

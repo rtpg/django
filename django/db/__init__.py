@@ -1,7 +1,12 @@
+from contextlib import contextmanager
+import os
+from asgiref.local import Local
+
 from django.core import signals
 from django.db.utils import (
     DEFAULT_DB_ALIAS,
     DJANGO_VERSION_PICKLE_KEY,
+    AsyncConnectionHandler,
     ConnectionHandler,
     ConnectionRouter,
     DatabaseError,
@@ -36,6 +41,124 @@ __all__ = [
 ]
 
 connections = ConnectionHandler()
+async_connections = AsyncConnectionHandler()
+
+new_connection_block_depth = Local()
+new_connection_block_depth.value = 0
+
+
+def modify_cxn_depth(f):
+    try:
+        existing_value = new_connection_block_depth.value
+    except AttributeError:
+        existing_value = 0
+    new_connection_block_depth.value = f(existing_value)
+
+
+def should_use_sync_fallback(async_variant):
+    return async_variant and (new_connection_block_depth.value == 0)
+
+
+commit_allowed = Local()
+commit_allowed.value = False
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def set_async_db_commit_permission(perm):
+    old_value = getattr(commit_allowed, "value", True)
+    commit_allowed.value = perm
+    try:
+        yield
+    finally:
+        commit_allowed.value = old_value
+
+
+@contextmanager
+def allow_async_db_commits():
+    with set_async_db_commit_permission(True):
+        yield
+
+
+@contextmanager
+def block_async_db_commits():
+    with set_async_db_commit_permission(False):
+        yield
+
+
+def is_commit_allowed():
+    try:
+        return commit_allowed.value
+    except:
+        # XXX making sure its set
+        commit_allowed.value = True
+        return True
+
+
+class new_connection:
+    """
+    Asynchronous context manager to instantiate new async connections.
+
+    """
+
+    def __init__(self, using=DEFAULT_DB_ALIAS, force_rollback=False):
+        self.using = using
+        if not force_rollback and not is_commit_allowed():
+            # this is for just figuring everything out
+            raise ValueError(
+                "Commits are currently blocked, use allow_async_db_commits to unblock"
+            )
+        self.force_rollback = force_rollback
+
+    def __enter__(self):
+        # XXX I need to fix up the codegen, for now this is going to no-op
+        if self.force_rollback:
+            # XXX IN TEST CONTEXT!
+            return
+        else:
+            raise NotSupportedError("new_connection doesn't support a sync context")
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # XXX another thing to remove
+        return
+
+    async def __aenter__(self):
+        # XXX stupid nonsense
+        modify_cxn_depth(lambda v: v + 1)
+        conn = connections.create_connection(self.using)
+        if conn.supports_async is False:
+            raise NotSupportedError(
+                "The database backend does not support asynchronous execution."
+            )
+
+        if conn.in_atomic_block:
+            raise NotSupportedError(
+                "Can't open an async connection while inside of a synchronous transaction block"
+            )
+        self.conn = conn
+
+        async_connections.add_connection(self.using, self.conn)
+
+        await self.conn.aensure_connection()
+        if self.force_rollback is True:
+            await self.conn.aset_autocommit(False)
+
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        # silly nonsense (again)
+        modify_cxn_depth(lambda v: v - 1)
+        autocommit = await self.conn.aget_autocommit()
+        if autocommit is False:
+            if exc_type is None and self.force_rollback is False:
+                await self.conn.acommit()
+            else:
+                await self.conn.arollback()
+        await self.conn.aclose()
+
+        async_connections.pop_connection(self.using)
+
 
 router = ConnectionRouter()
 

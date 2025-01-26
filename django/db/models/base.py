@@ -5,7 +5,7 @@ from collections import defaultdict
 from functools import partialmethod
 from itertools import chain
 
-from asgiref.sync import sync_to_async
+from asgiref.sync import async_to_sync, sync_to_async
 
 import django
 from django.apps import apps
@@ -25,6 +25,7 @@ from django.db import (
     connection,
     connections,
     router,
+    should_use_sync_fallback,
     transaction,
 )
 from django.db.models import NOT_PROVIDED, ExpressionWrapper, IntegerField, Max, Value
@@ -50,6 +51,7 @@ from django.db.models.signals import (
     pre_save,
 )
 from django.db.models.utils import AltersData, make_model_tuple
+from django.utils.codegen import from_codegen, generate_unasynced, ASYNC_TRUTH_MARKER
 from django.utils.encoding import force_str
 from django.utils.hashable import make_hashable
 from django.utils.text import capfirst, get_text_list
@@ -585,6 +587,28 @@ class Model(AltersData, metaclass=ModelBase):
         new._state.db = db
         return new
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # the following are pairings of sync and async variants of model methods
+        # if a subclass overrides one of these without overriding the other, then
+        # we should make the other one fallback to using the overriding one
+        #
+        # for example: if I override save, then asave should call into my overridden
+        # save, instead of the default asave (which does it's own thing)
+        method_pairings = [
+            ("save", "asave"),
+        ]
+
+        for sync_variant, async_variant in method_pairings:
+            sync_defined = sync_variant in cls.__dict__
+            async_defined = async_variant in cls.__dict__
+            if sync_defined and not async_defined:
+                # async should fallback to sync
+                setattr(cls, async_variant, sync_to_async(getattr(cls, sync_variant)))
+            if not sync_defined and async_defined:
+                # sync should fallback to async
+                setattr(cls, sync_variant, async_to_sync(getattr(cls, async_variant)))
+
     def __repr__(self):
         return "<%s: %s>" % (self.__class__.__name__, self)
 
@@ -785,6 +809,7 @@ class Model(AltersData, metaclass=ModelBase):
             return getattr(self, field_name)
         return getattr(self, field.attname)
 
+    @from_codegen
     def save(
         self,
         *,
@@ -801,7 +826,6 @@ class Model(AltersData, metaclass=ModelBase):
         that the "save" must be an SQL insert or update (or equivalent for
         non-SQL backends), respectively. Normally, they should not be set.
         """
-
         self._prepare_related_fields_for_save(operation_name="save")
 
         using = using or router.db_for_write(self.__class__, instance=self)
@@ -854,8 +878,7 @@ class Model(AltersData, metaclass=ModelBase):
             update_fields=update_fields,
         )
 
-    save.alters_data = True
-
+    @generate_unasynced()
     async def asave(
         self,
         *,
@@ -864,13 +887,75 @@ class Model(AltersData, metaclass=ModelBase):
         using=None,
         update_fields=None,
     ):
-        return await sync_to_async(self.save)(
+        """
+        Save the current instance. Override this in a subclass if you want to
+        control the saving process.
+
+        The 'force_insert' and 'force_update' parameters can be used to insist
+        that the "save" must be an SQL insert or update (or equivalent for
+        non-SQL backends), respectively. Normally, they should not be set.
+        """
+        if ASYNC_TRUTH_MARKER:
+            if should_use_sync_fallback(ASYNC_TRUTH_MARKER):
+                return await sync_to_async(self.save)(
+                    force_insert=force_insert,
+                    force_update=force_update,
+                    using=using,
+                    update_fields=update_fields,
+                )
+        self._prepare_related_fields_for_save(operation_name="save")
+
+        using = using or router.db_for_write(self.__class__, instance=self)
+        if force_insert and (force_update or update_fields):
+            raise ValueError("Cannot force both insert and updating in model saving.")
+
+        deferred_non_generated_fields = {
+            f.attname
+            for f in self._meta.concrete_fields
+            if f.attname not in self.__dict__ and f.generated is False
+        }
+        if update_fields is not None:
+            # If update_fields is empty, skip the save. We do also check for
+            # no-op saves later on for inheritance cases. This bailout is
+            # still needed for skipping signal sending.
+            if not update_fields:
+                return
+
+            update_fields = frozenset(update_fields)
+            field_names = self._meta._non_pk_concrete_field_names
+            not_updatable_fields = update_fields.difference(field_names)
+
+            if not_updatable_fields:
+                raise ValueError(
+                    "The following fields do not exist in this model, are m2m "
+                    "fields, primary keys, or are non-concrete fields: %s"
+                    % ", ".join(not_updatable_fields)
+                )
+
+        # If saving to the same database, and this model is deferred, then
+        # automatically do an "update_fields" save on the loaded fields.
+        elif (
+            not force_insert
+            and deferred_non_generated_fields
+            and using == self._state.db
+        ):
+            field_names = set()
+            pk_fields = self._meta.pk_fields
+            for field in self._meta.concrete_fields:
+                if field not in pk_fields and not hasattr(field, "through"):
+                    field_names.add(field.attname)
+            loaded_fields = field_names.difference(deferred_non_generated_fields)
+            if loaded_fields:
+                update_fields = frozenset(loaded_fields)
+
+        await self.asave_base(
+            using=using,
             force_insert=force_insert,
             force_update=force_update,
-            using=using,
             update_fields=update_fields,
         )
 
+    save.alters_data = True
     asave.alters_data = True
 
     @classmethod
@@ -893,6 +978,7 @@ class Model(AltersData, metaclass=ModelBase):
                 )
         return force_insert
 
+    @from_codegen
     def save_base(
         self,
         raw=False,
@@ -939,6 +1025,7 @@ class Model(AltersData, metaclass=ModelBase):
                 parent_inserted = self._save_parents(
                     cls, using, update_fields, force_insert
                 )
+
             updated = self._save_table(
                 raw,
                 cls,
@@ -963,8 +1050,82 @@ class Model(AltersData, metaclass=ModelBase):
                 using=using,
             )
 
-    save_base.alters_data = True
+    @generate_unasynced()
+    async def asave_base(
+        self,
+        raw=False,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+        """
+        Handle the parts of saving which should be done only once per save,
+        yet need to be done in raw saves, too. This includes some sanity
+        checks and signal sending.
 
+        The 'raw' argument is telling save_base not to save any parent
+        models and not to do any changes to the values before save. This
+        is used by fixture loading.
+        """
+        using = using or router.db_for_write(self.__class__, instance=self)
+        assert not (force_insert and (force_update or update_fields))
+        assert update_fields is None or update_fields
+        cls = origin = self.__class__
+        # Skip proxies, but keep the origin as the proxy model.
+        if cls._meta.proxy:
+            cls = cls._meta.concrete_model
+        meta = cls._meta
+        if not meta.auto_created:
+            pre_save.send(
+                sender=origin,
+                instance=self,
+                raw=raw,
+                using=using,
+                update_fields=update_fields,
+            )
+        # A transaction isn't needed if one query is issued.
+        if meta.parents:
+            context_manager = transaction.atomic(using=using, savepoint=False)
+        else:
+            context_manager = transaction.mark_for_rollback_on_error(using=using)
+        async with context_manager:
+            parent_inserted = False
+            if not raw:
+                # Validate force insert only when parents are inserted.
+                force_insert = self._validate_force_insert(force_insert)
+                parent_inserted = await self._asave_parents(
+                    cls, using, update_fields, force_insert
+                )
+
+            updated = await self._asave_table(
+                raw,
+                cls,
+                force_insert or parent_inserted,
+                force_update,
+                using,
+                update_fields,
+            )
+        # Store the database on which the object was saved
+        self._state.db = using
+        # Once saved, this is no longer a to-be-added instance.
+        self._state.adding = False
+
+        # Signal that the save is complete
+        if not meta.auto_created:
+            post_save.send(
+                sender=origin,
+                instance=self,
+                created=(not updated),
+                update_fields=update_fields,
+                raw=raw,
+                using=using,
+            )
+
+    save_base.alters_data = True
+    asave_base.alters_data = True
+
+    @from_codegen
     def _save_parents(
         self, cls, using, update_fields, force_insert, updated_parents=None
     ):
@@ -1012,6 +1173,55 @@ class Model(AltersData, metaclass=ModelBase):
                     field.delete_cached_value(self)
         return inserted
 
+    @generate_unasynced()
+    async def _asave_parents(
+        self, cls, using, update_fields, force_insert, updated_parents=None
+    ):
+        """Save all the parents of cls using values from self."""
+        meta = cls._meta
+        inserted = False
+        if updated_parents is None:
+            updated_parents = {}
+        for parent, field in meta.parents.items():
+            # Make sure the link fields are synced between parent and self.
+            if (
+                field
+                and getattr(self, parent._meta.pk.attname) is None
+                and getattr(self, field.attname) is not None
+            ):
+                setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
+            if (parent_updated := updated_parents.get(parent)) is None:
+                parent_inserted = await self._asave_parents(
+                    cls=parent,
+                    using=using,
+                    update_fields=update_fields,
+                    force_insert=force_insert,
+                    updated_parents=updated_parents,
+                )
+                updated = await self._asave_table(
+                    cls=parent,
+                    using=using,
+                    update_fields=update_fields,
+                    force_insert=parent_inserted or issubclass(parent, force_insert),
+                )
+                if not updated:
+                    inserted = True
+                updated_parents[parent] = updated
+            elif not parent_updated:
+                inserted = True
+            # Set the parent's PK value to self.
+            if field:
+                setattr(self, field.attname, self._get_pk_val(parent._meta))
+                # Since we didn't have an instance of the parent handy set
+                # attname directly, bypassing the descriptor. Invalidate
+                # the related object cache, in case it's been accidentally
+                # populated. A fresh instance will be re-built from the
+                # database if necessary.
+                if field.is_cached(self):
+                    field.delete_cached_value(self)
+        return inserted
+
+    @from_codegen
     def _save_table(
         self,
         raw=False,
@@ -1108,6 +1318,104 @@ class Model(AltersData, metaclass=ModelBase):
                     setattr(self, field.attname, value)
         return updated
 
+    @generate_unasynced()
+    async def _asave_table(
+        self,
+        raw=False,
+        cls=None,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+        """
+        Do the heavy-lifting involved in saving. Update or insert the data
+        for a single table.
+        """
+        meta = cls._meta
+        pk_fields = meta.pk_fields
+        non_pks_non_generated = [
+            f
+            for f in meta.local_concrete_fields
+            if f not in pk_fields and not f.generated
+        ]
+
+        if update_fields:
+            non_pks_non_generated = [
+                f
+                for f in non_pks_non_generated
+                if f.name in update_fields or f.attname in update_fields
+            ]
+
+        if not self._is_pk_set(meta):
+            pk_val = meta.pk.get_pk_value_on_save(self)
+            setattr(self, meta.pk.attname, pk_val)
+        pk_set = self._is_pk_set(meta)
+        if not pk_set and (force_update or update_fields):
+            raise ValueError("Cannot force an update in save() with no primary key.")
+        updated = False
+        # Skip an UPDATE when adding an instance and primary key has a default.
+        if (
+            not raw
+            and not force_insert
+            and not force_update
+            and self._state.adding
+            and all(f.has_default() or f.has_db_default() for f in meta.pk_fields)
+        ):
+            force_insert = True
+        # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
+        if pk_set and not force_insert:
+            base_qs = cls._base_manager.using(using)
+            values = [
+                (
+                    f,
+                    None,
+                    (getattr(self, f.attname) if raw else f.pre_save(self, False)),
+                )
+                for f in non_pks_non_generated
+            ]
+            forced_update = update_fields or force_update
+            pk_val = self._get_pk_val(meta)
+            updated = await self._ado_update(
+                base_qs, using, pk_val, values, update_fields, forced_update
+            )
+            if force_update and not updated:
+                raise DatabaseError("Forced update did not affect any rows.")
+            if update_fields and not updated:
+                raise DatabaseError("Save with update_fields did not affect any rows.")
+        if not updated:
+            if meta.order_with_respect_to:
+                # If this is a model with an order_with_respect_to
+                # autopopulate the _order field
+                field = meta.order_with_respect_to
+                filter_args = field.get_filter_kwargs_for_object(self)
+                self._order = (
+                    cls._base_manager.using(using)
+                    .filter(**filter_args)
+                    .aggregate(
+                        _order__max=Coalesce(
+                            ExpressionWrapper(
+                                Max("_order") + Value(1), output_field=IntegerField()
+                            ),
+                            Value(0),
+                        ),
+                    )["_order__max"]
+                )
+            fields = [
+                f
+                for f in meta.local_concrete_fields
+                if not f.generated and (pk_set or f is not meta.auto_field)
+            ]
+            returning_fields = meta.db_returning_fields
+            results = await self._ado_insert(
+                cls._base_manager, using, fields, returning_fields, raw
+            )
+            if results:
+                for value, field in zip(results[0], returning_fields):
+                    setattr(self, field.attname, value)
+        return updated
+
+    @from_codegen
     def _do_update(self, base_qs, using, pk_val, values, update_fields, forced_update):
         """
         Try to update the model. Return True if the model was updated (if an
@@ -1136,12 +1444,58 @@ class Model(AltersData, metaclass=ModelBase):
             )
         return filtered._update(values) > 0
 
+    @generate_unasynced()
+    async def _ado_update(
+        self, base_qs, using, pk_val, values, update_fields, forced_update
+    ):
+        """
+        Try to update the model. Return True if the model was updated (if an
+        update query was done and a matching row was found in the DB).
+        """
+        filtered = base_qs.filter(pk=pk_val)
+        if not values:
+            # We can end up here when saving a model in inheritance chain where
+            # update_fields doesn't target any field in current model. In that
+            # case we just say the update succeeded. Another case ending up here
+            # is a model with just PK - in that case check that the PK still
+            # exists.
+            return update_fields is not None or await filtered.aexists()
+        if self._meta.select_on_save and not forced_update:
+            return (
+                await filtered.aexists()
+                and
+                # It may happen that the object is deleted from the DB right after
+                # this check, causing the subsequent UPDATE to return zero matching
+                # rows. The same result can occur in some rare cases when the
+                # database returns zero despite the UPDATE being executed
+                # successfully (a row is matched and updated). In order to
+                # distinguish these two cases, the object's existence in the
+                # database is again checked for if the UPDATE query returns 0.
+                (await filtered._aupdate(values) > 0 or (await filtered.aexists()))
+            )
+        return await filtered._aupdate(values) > 0
+
+    @from_codegen
     def _do_insert(self, manager, using, fields, returning_fields, raw):
         """
         Do an INSERT. If returning_fields is defined then this method should
         return the newly created data for the model.
         """
         return manager._insert(
+            [self],
+            fields=fields,
+            returning_fields=returning_fields,
+            using=using,
+            raw=raw,
+        )
+
+    @generate_unasynced()
+    async def _ado_insert(self, manager, using, fields, returning_fields, raw):
+        """
+        Do an INSERT. If returning_fields is defined then this method should
+        return the newly created data for the model.
+        """
+        return await manager._ainsert(
             [self],
             fields=fields,
             returning_fields=returning_fields,
