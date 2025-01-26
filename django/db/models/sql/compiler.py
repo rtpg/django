@@ -1845,8 +1845,10 @@ class SQLCompiler:
         rows = chain.from_iterable(results)
         if converters:
             rows = self.apply_converters(rows, converters)
-            if tuple_expected:
-                rows = map(tuple, rows)
+        if self.has_composite_fields(fields):
+            rows = self.composite_fields_to_tuples(rows, fields)
+        if tuple_expected:
+            rows = map(tuple, rows)
         return rows
 
     @from_codegen
@@ -1949,15 +1951,15 @@ class SQLCompiler:
     ):
         """
         Run the query against the database and return the result(s). The
-        return value is a single data item if result_type is SINGLE, or an
-        iterator over the results if the result_type is MULTI.
+        return value depends on the value of result_type.
 
-        result_type is either MULTI (use fetchmany() to retrieve all rows),
-        SINGLE (only retrieve a single row), or None. In this last case, the
-        cursor is returned if any query is executed, since it's used by
-        subclasses such as InsertQuery). It's possible, however, that no query
-        is needed, as the filters describe an empty set. In that case, None is
-        returned, to avoid any unnecessary database interaction.
+        When result_type is:
+        - MULTI: Retrieves all rows using fetchmany(). Wraps in an iterator for
+           chunked reads when supported.
+        - SINGLE: Retrieves a single row using fetchone().
+        - ROW_COUNT: Retrieves the number of rows in the result.
+        - CURSOR: Runs the query, and returns the cursor object. It is the
+           caller's responsibility to close the cursor.
         """
         result_type = result_type or NO_RESULTS
         try:
@@ -1989,8 +1991,12 @@ class SQLCompiler:
             await cursor.aclose()
             raise
 
-        if result_type == CURSOR:
-            # Give the caller the cursor to process and close.
+        if result_type == ROW_COUNT:
+            try:
+                return cursor.rowcount
+            finally:
+                cursor.close()
+        elif result_type == CURSOR:
             return cursor
         elif result_type == SINGLE:
             try:
@@ -2393,6 +2399,7 @@ class SQLInsertCompiler(SQLCompiler):
                         ),
                     )
                 ]
+
             else:
                 # Backend doesn't support returning fields and no auto-field
                 # that can be retrieved from `last_insert_id` was specified.
@@ -2432,21 +2439,28 @@ class SQLInsertCompiler(SQLCompiler):
                     )
                 ]
                 cols = [field.get_col(opts.db_table) for field in self.returning_fields]
-            else:
-                cols = [opts.pk.get_col(opts.db_table)]
+            elif returning_fields and isinstance(
+                returning_field := returning_fields[0], AutoField
+            ):
+                cols = [returning_field.get_col(opts.db_table)]
                 rows = [
                     (
                         self.connection.ops.last_insert_id(
                             cursor,
                             opts.db_table,
-                            opts.pk.column,
+                            returning_field.column,
                         ),
                     )
                 ]
+
+            else:
+                # Backend doesn't support returning fields and no auto-field
+                # that can be retrieved from `last_insert_id` was specified.
+                return []
         converters = self.get_converters(cols)
         if converters:
-            rows = list(self.apply_converters(rows, converters))
-        return rows
+            rows = self.apply_converters(rows, converters)
+        return list(rows)
 
 
 class SQLDeleteCompiler(SQLCompiler):
@@ -2697,20 +2711,18 @@ class SQLUpdateCompiler(SQLCompiler):
         non-empty query that is executed. Row counts for any subsequent,
         related queries are not available.
         """
-        row_count = await super().aexecute_sql(
-            ROW_COUNT if result_type == ROW_COUNT else NO_RESULTS
-        )
+        row_count = await super().aexecute_sql(result_type)
         is_empty = row_count is None
         row_count = row_count or 0
 
         for query in self.query.get_related_updates():
-            # NB: if result_type == NO_RESULTS then aux_row_count is None
+            # If the result_type is NO_RESULTS then the aux_row_count is None.
             aux_row_count = await query.get_compiler(self.using).aexecute_sql(
                 result_type
             )
             if is_empty and aux_row_count:
-                # this will return the row count for any related updates as
-                # the number of rows updated
+                # Returns the row count for any related updates as the number of
+                # rows updated.
                 row_count = aux_row_count
                 is_empty = False
         return row_count
