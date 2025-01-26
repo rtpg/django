@@ -14,3 +14,10 @@ at an environment variable?)
 ----
 
 assertNumQueries support in an async context....
+
+
+----
+
+skipUnlessDBFeature etc.... none of this stuff works with async tests. You can tell because test blocks with those labels are never awaited
+
+---
