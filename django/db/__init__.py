@@ -111,6 +111,18 @@ class new_connection:
             )
         self.force_rollback = force_rollback
 
+    def __enter__(self):
+        # XXX I need to fix up the codegen, for now this is going to no-op
+        if self.force_rollback:
+            # XXX IN TEST CONTEXT!
+            return
+        else:
+            raise NotSupportedError("new_connection doesn't support a sync context")
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # XXX another thing to remove
+        return
+
     async def __aenter__(self):
         # XXX stupid nonsense
         modify_cxn_depth(lambda v: v + 1)
