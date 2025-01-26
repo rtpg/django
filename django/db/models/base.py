@@ -52,7 +52,6 @@ from django.db.models.signals import (
 )
 from django.db.models.utils import AltersData, make_model_tuple
 from django.utils.codegen import from_codegen, generate_unasynced, ASYNC_TRUTH_MARKER
-from django.utils.deprecation import RemovedInDjango60Warning
 from django.utils.encoding import force_str
 from django.utils.hashable import make_hashable
 from django.utils.text import capfirst, get_text_list

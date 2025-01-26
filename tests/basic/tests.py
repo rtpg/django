@@ -213,88 +213,6 @@ class ModelInstanceCreationTests(TestCase):
         with self.assertNumQueries(1):
             PrimaryKeyWithFalseyDbDefault().save()
 
-    def test_save_too_many_positional_arguments(self):
-        a = Article()
-        msg = "Model.save() takes from 1 to 5 positional arguments but 6 were given"
-        with (
-            self.assertWarns(RemovedInDjango60Warning),
-            self.assertRaisesMessage(TypeError, msg),
-        ):
-            a.save(False, False, None, None, None)
-
-    def test_save_conflicting_positional_and_named_arguments(self):
-        a = Article()
-        cases = [
-            ("force_insert", True, [42]),
-            ("force_update", None, [42, 41]),
-            ("using", "some-db", [42, 41, 40]),
-            ("update_fields", ["foo"], [42, 41, 40, 39]),
-        ]
-        for param_name, param_value, args in cases:
-            with self.subTest(param_name=param_name):
-                msg = f"Model.save() got multiple values for argument '{param_name}'"
-                with (
-                    self.assertWarns(RemovedInDjango60Warning),
-                    self.assertRaisesMessage(TypeError, msg),
-                ):
-                    a.save(*args, **{param_name: param_value})
-
-    async def test_asave_deprecation(self):
-        a = Article(headline="original", pub_date=datetime(2014, 5, 16))
-        msg = "Passing positional arguments to asave() is deprecated"
-        with self.assertWarnsMessage(RemovedInDjango60Warning, msg) as ctx:
-            await a.asave(False, False, None, None)
-            self.assertEqual(await Article.objects.acount(), 1)
-        self.assertEqual(ctx.filename, __file__)
-
-    @unittest.skip("XXX do this later")
-    async def test_asave_deprecation_positional_arguments_used(self):
-        a = Article()
-        fields = ["headline"]
-        with (
-            self.assertWarns(RemovedInDjango60Warning),
-            mock.patch.object(a, "asave_base") as mock_save_base,
-        ):
-            await a.asave(None, 1, 2, fields)
-        self.assertEqual(
-            mock_save_base.mock_calls,
-            [
-                mock.call(
-                    using=2,
-                    force_insert=None,
-                    force_update=1,
-                    update_fields=frozenset(fields),
-                )
-            ],
-        )
-
-    async def test_asave_too_many_positional_arguments(self):
-        a = Article()
-        msg = "Model.asave() takes from 1 to 5 positional arguments but 6 were given"
-        with (
-            self.assertWarns(RemovedInDjango60Warning),
-            self.assertRaisesMessage(TypeError, msg),
-        ):
-            await a.asave(False, False, None, None, None)
-
-    async def test_asave_conflicting_positional_and_named_arguments(self):
-        a = Article()
-        cases = [
-            ("force_insert", True, [42]),
-            ("force_update", None, [42, 41]),
-            ("using", "some-db", [42, 41, 40]),
-            ("update_fields", ["foo"], [42, 41, 40, 39]),
-        ]
-        for param_name, param_value, args in cases:
-            with self.subTest(param_name=param_name):
-                msg = f"Model.asave() got multiple values for argument '{param_name}'"
-                with (
-                    self.assertWarns(RemovedInDjango60Warning),
-                    self.assertRaisesMessage(TypeError, msg),
-                ):
-                    await a.asave(*args, **{param_name: param_value})
-
-    @ignore_warnings(category=RemovedInDjango60Warning)
     def test_save_positional_arguments(self):
         a = Article.objects.create(headline="original", pub_date=datetime(2014, 5, 16))
         a.headline = "changed"
@@ -308,7 +226,6 @@ class ModelInstanceCreationTests(TestCase):
         a.refresh_from_db()
         self.assertEqual(a.headline, "changed")
 
-    @ignore_warnings(category=RemovedInDjango60Warning)
     async def test_asave_positional_arguments(self):
         a = await Article.objects.acreate(
             headline="original", pub_date=datetime(2014, 5, 16)
