@@ -369,7 +369,7 @@ def teardown_databases(old_config, verbosity, parallel=0, keepdb=False):
             import objgraph
             import pdb
 
-            from django.db.backends.postgresql.base import DatabaseWrapper, ASCXN
+            from django.db.backends.postgresql.base import DatabaseWrapper
             import gc
 
             def the_objs(klass):
