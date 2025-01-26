@@ -3,6 +3,7 @@ from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.exceptions import FieldError
 from django.db.models import Q, prefetch_related_objects
 from django.test import SimpleTestCase, TestCase, skipUnlessDBFeature
+from django.utils.codegen import generate_unasynced
 
 from .models import (
     AllowsNullGFK,
@@ -706,6 +707,18 @@ class GenericRelationsTests(TestCase):
         platypus = Animal.objects.prefetch_related("tags").get(pk=self.platypus.pk)
         self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
         weird_tag = self.platypus.tags.create(tag="weird")
+        platypus.tags.add(weird_tag)
+        self.assertSequenceEqual(platypus.tags.all(), [furry_tag, weird_tag])
+        platypus.tags.remove(weird_tag)
+        self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
+
+    @generate_unasynced()
+        furry_tag = await self.platypus.tags.acreate(tag="furry")
+        platypus = await Animal.objects.prefetch_related("tags").aget(
+            pk=self.platypus.pk
+        )
+        self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
+        weird_tag = await self.platypus.tags.acreate(tag="weird")
         platypus.tags.add(weird_tag)
         self.assertSequenceEqual(platypus.tags.all(), [furry_tag, weird_tag])
         platypus.tags.remove(weird_tag)
