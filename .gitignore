@@ -22,3 +22,6 @@ tests/screenshots/
 
 *.sqlite3
 passed.tests
+
+.coverage
+.envrc
