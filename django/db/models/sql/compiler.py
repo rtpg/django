@@ -27,6 +27,7 @@ from django.db.transaction import TransactionManagementError
 from django.utils.functional import cached_property
 from django.utils.hashable import make_hashable
 from django.utils.regex_helper import _lazy_re_compile
+from django.utils.codegen import from_codegen, generate_unasynced, ASYNC_TRUTH_MARKER
 
 
 class PositionRef(Ref):
@@ -1590,6 +1591,7 @@ class SQLCompiler:
         """
         return bool(self.execute_sql(SINGLE))
 
+    @from_codegen
     def execute_sql(
         self, result_type=MULTI, chunked_fetch=False, chunk_size=GET_ITERATOR_CHUNK_SIZE
     ):
@@ -1619,6 +1621,7 @@ class SQLCompiler:
             cursor = self.connection.chunked_cursor()
         else:
             cursor = self.connection.cursor()
+
         try:
             cursor.execute(sql, params)
         except Exception:
@@ -1645,6 +1648,82 @@ class SQLCompiler:
                 cursor.close()
         if result_type == NO_RESULTS:
             cursor.close()
+            return
+
+        result = cursor_iter(
+            cursor,
+            self.connection.features.empty_fetchmany_value,
+            self.col_count if self.has_extra_select else None,
+            chunk_size,
+        )
+        if not chunked_fetch or not self.connection.features.can_use_chunked_reads:
+            # If we are using non-chunked reads, we return the same data
+            # structure as normally, but ensure it is all read into memory
+            # before going any further. Use chunked_fetch if requested,
+            # unless the database doesn't support it.
+            return list(result)
+        return result
+
+    @generate_unasynced()
+    async def aexecute_sql(
+        self, result_type=MULTI, chunked_fetch=False, chunk_size=GET_ITERATOR_CHUNK_SIZE
+    ):
+        """
+        Run the query against the database and return the result(s). The
+        return value is a single data item if result_type is SINGLE, or an
+        iterator over the results if the result_type is MULTI.
+
+        result_type is either MULTI (use fetchmany() to retrieve all rows),
+        SINGLE (only retrieve a single row), or None. In this last case, the
+        cursor is returned if any query is executed, since it's used by
+        subclasses such as InsertQuery). It's possible, however, that no query
+        is needed, as the filters describe an empty set. In that case, None is
+        returned, to avoid any unnecessary database interaction.
+        """
+        result_type = result_type or NO_RESULTS
+        try:
+            sql, params = self.as_sql()
+            if not sql:
+                raise EmptyResultSet
+        except EmptyResultSet:
+            if result_type == MULTI:
+                return iter([])
+            else:
+                return
+        if ASYNC_TRUTH_MARKER:
+            if chunked_fetch:
+                # XX def wrong
+                cursor = self.connection.chunked_cursor()
+            else:
+                # XXX how to handle aexit here
+                cursor = await self.connection.acursor().__aenter__()
+        else:
+            if chunked_fetch:
+                cursor = self.connection.chunked_cursor()
+            else:
+                cursor = self.connection.cursor()
+
+        try:
+            await cursor.aexecute(sql, params)
+        except Exception:
+            # Might fail for server-side cursors (e.g. connection closed)
+            await cursor.aclose()
+            raise
+
+        if result_type == CURSOR:
+            # Give the caller the cursor to process and close.
+            return cursor
+        if result_type == SINGLE:
+            try:
+                val = await cursor.afetchone()
+                if val:
+                    return val[0 : self.col_count]
+                return val
+            finally:
+                # done with the cursor
+                await cursor.aclose()
+        if result_type == NO_RESULTS:
+            await cursor.aclose()
             return
 
         result = cursor_iter(
@@ -1881,6 +1960,7 @@ class SQLInsertCompiler(SQLCompiler):
                 for p, vals in zip(placeholder_rows, param_rows)
             ]
 
+    @from_codegen
     def execute_sql(self, returning_fields=None):
         assert not (
             returning_fields
@@ -1931,6 +2011,52 @@ class SQLInsertCompiler(SQLCompiler):
         if converters:
             rows = self.apply_converters(rows, converters)
         return list(rows)
+
+    @generate_unasynced()
+    async def aexecute_sql(self, returning_fields=None):
+        assert not (
+            returning_fields
+            and len(self.query.objs) != 1
+            and not self.connection.features.can_return_rows_from_bulk_insert
+        )
+        opts = self.query.get_meta()
+        self.returning_fields = returning_fields
+        cols = []
+        async with self.connection.acursor() as cursor:
+            for sql, params in self.as_sql():
+                await cursor.aexecute(sql, params)
+            if not self.returning_fields:
+                return []
+            if (
+                self.connection.features.can_return_rows_from_bulk_insert
+                and len(self.query.objs) > 1
+            ):
+                rows = self.connection.ops.fetch_returned_insert_rows(cursor)
+                cols = [field.get_col(opts.db_table) for field in self.returning_fields]
+            elif self.connection.features.can_return_columns_from_insert:
+                assert len(self.query.objs) == 1
+                rows = [
+                    await self.connection.ops.afetch_returned_insert_columns(
+                        cursor,
+                        self.returning_params,
+                    )
+                ]
+                cols = [field.get_col(opts.db_table) for field in self.returning_fields]
+            else:
+                cols = [opts.pk.get_col(opts.db_table)]
+                rows = [
+                    (
+                        self.connection.ops.last_insert_id(
+                            cursor,
+                            opts.db_table,
+                            opts.pk.column,
+                        ),
+                    )
+                ]
+        converters = self.get_converters(cols)
+        if converters:
+            rows = list(self.apply_converters(rows, converters))
+        return rows
 
 
 class SQLDeleteCompiler(SQLCompiler):
@@ -2058,6 +2184,7 @@ class SQLUpdateCompiler(SQLCompiler):
             result.append("WHERE %s" % where)
         return " ".join(result), tuple(update_params + params)
 
+    @from_codegen
     def execute_sql(self, result_type):
         """
         Execute the specified update. Return the number of rows affected by
@@ -2078,6 +2205,28 @@ class SQLUpdateCompiler(SQLCompiler):
                 row_count = aux_row_count
                 is_empty = False
         return row_count
+
+    @generate_unasynced()
+    async def aexecute_sql(self, result_type):
+        """
+        Execute the specified update. Return the number of rows affected by
+        the primary update query. The "primary update query" is the first
+        non-empty query that is executed. Row counts for any subsequent,
+        related queries are not available.
+        """
+        cursor = await super().aexecute_sql(result_type)
+        try:
+            rows = cursor.rowcount if cursor else 0
+            is_empty = cursor is None
+        finally:
+            if cursor:
+                await cursor.aclose()
+        for query in self.query.get_related_updates():
+            aux_rows = await query.get_compiler(self.using).aexecute_sql(result_type)
+            if is_empty and aux_rows:
+                rows = aux_rows
+                is_empty = False
+        return rows
 
     def pre_sql_setup(self):
         """
