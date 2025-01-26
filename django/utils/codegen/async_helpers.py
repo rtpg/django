@@ -52,6 +52,9 @@ class UnasyncifyMethod(cst.CSTTransformer):
         Return the function name for an unasync version of this
         function (or None if there is no unasync version)
         """
+        # XXX bit embarassing but...
+        if func_name == "all":
+            return None
         if func_name.startswith("a"):
             return func_name[1:]
         elif func_name.startswith("_a"):
