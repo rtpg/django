@@ -94,26 +94,51 @@ class BulkCreateTests(TestCase):
         )
         self.assertEqual(Country.objects.count(), 4)
 
+    @from_codegen
     def test_multi_table_inheritance_unsupported(self):
-        expected_message = "Can't bulk create a multi-table inherited model"
-        with self.assertRaisesMessage(ValueError, expected_message):
-            Pizzeria.objects.bulk_create(
-                [
-                    Pizzeria(name="The Art of Pizza"),
-                ]
-            )
-        with self.assertRaisesMessage(ValueError, expected_message):
-            ProxyMultiCountry.objects.bulk_create(
-                [
-                    ProxyMultiCountry(name="Fillory", iso_two_letter="FL"),
-                ]
-            )
-        with self.assertRaisesMessage(ValueError, expected_message):
-            ProxyMultiProxyCountry.objects.bulk_create(
-                [
-                    ProxyMultiProxyCountry(name="Fillory", iso_two_letter="FL"),
-                ]
-            )
+        with new_connection(force_rollback=True):
+            expected_message = "Can't bulk create a multi-table inherited model"
+            with self.assertRaisesMessage(ValueError, expected_message):
+                Pizzeria.objects.bulk_create(
+                    [
+                        Pizzeria(name="The Art of Pizza"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                ProxyMultiCountry.objects.bulk_create(
+                    [
+                        ProxyMultiCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                ProxyMultiProxyCountry.objects.bulk_create(
+                    [
+                        ProxyMultiProxyCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
+
+    @generate_unasynced()
+    async def test_async_multi_table_inheritance_unsupported(self):
+        async with new_connection(force_rollback=True):
+            expected_message = "Can't bulk create a multi-table inherited model"
+            with self.assertRaisesMessage(ValueError, expected_message):
+                await Pizzeria.objects.abulk_create(
+                    [
+                        Pizzeria(name="The Art of Pizza"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                await ProxyMultiCountry.objects.abulk_create(
+                    [
+                        ProxyMultiCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                await ProxyMultiProxyCountry.objects.abulk_create(
+                    [
+                        ProxyMultiProxyCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
 
     def test_proxy_inheritance_supported(self):
         ProxyCountry.objects.bulk_create(
