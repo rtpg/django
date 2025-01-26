@@ -5,9 +5,10 @@ from threading import Event, Thread, Timer
 from unittest.mock import patch
 
 from django.core.exceptions import FieldError
-from django.db import DatabaseError, IntegrityError, connection
+from django.db import DatabaseError, IntegrityError, connection, new_connection
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
+from django.utils.codegen import from_codegen, generate_unasynced
 from django.utils.functional import lazy
 
 from .models import (
@@ -68,6 +69,7 @@ class GetOrCreateTests(TestCase):
         self.assertFalse(created)
         self.assertEqual(Person.objects.count(), 2)
 
+    @from_codegen
     def test_get_or_create_invalid_params(self):
         """
         If you don't specify a value or default value for all required
@@ -75,6 +77,16 @@ class GetOrCreateTests(TestCase):
         """
         with self.assertRaises(IntegrityError):
             Person.objects.get_or_create(first_name="Tom", last_name="Smith")
+
+    @generate_unasynced()
+    async def test_async_get_or_create_invalid_params(self):
+        """
+        If you don't specify a value or default value for all required
+        fields, you will get an error.
+        """
+        async with new_connection(force_rollback=True):
+            with self.assertRaises(IntegrityError):
+                await Person.objects.aget_or_create(first_name="Tom", last_name="Smith")
 
     def test_get_or_create_with_pk_property(self):
         """
