@@ -1,8 +1,11 @@
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.exceptions import FieldError
+from django.db import new_connection
 from django.db.models import Q, prefetch_related_objects
 from django.test import SimpleTestCase, TestCase, skipUnlessDBFeature
+from django.test.testcases import TransactionTestCase
+from django.utils.asyncio import alist
 from django.utils.codegen import from_codegen, generate_unasynced
 
 from .models import (
@@ -702,25 +705,11 @@ class GenericRelationsTests(TestCase):
         platypus.tags.set([weird_tag])
         self.assertSequenceEqual(platypus.tags.all(), [weird_tag])
 
-    @from_codegen
     def test_add_then_remove_after_prefetch(self):
         furry_tag = self.platypus.tags.create(tag="furry")
         platypus = Animal.objects.prefetch_related("tags").get(pk=self.platypus.pk)
         self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
         weird_tag = self.platypus.tags.create(tag="weird")
-        platypus.tags.add(weird_tag)
-        self.assertSequenceEqual(platypus.tags.all(), [furry_tag, weird_tag])
-        platypus.tags.remove(weird_tag)
-        self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
-
-    @generate_unasynced()
-    async def test_async_add_then_remove_after_prefetch(self):
-        furry_tag = await self.platypus.tags.acreate(tag="furry")
-        platypus = await Animal.objects.prefetch_related("tags").aget(
-            pk=self.platypus.pk
-        )
-        self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
-        weird_tag = await self.platypus.tags.acreate(tag="weird")
         platypus.tags.add(weird_tag)
         self.assertSequenceEqual(platypus.tags.all(), [furry_tag, weird_tag])
         platypus.tags.remove(weird_tag)
@@ -875,3 +864,45 @@ class TestInitWithNoneArgument(SimpleTestCase):
         # TaggedItem requires a content_type but initializing with None should
         # be allowed.
         TaggedItem(content_object=None)
+
+
+class GenericRelationsAsyncTest(TransactionTestCase):
+    """
+    XXX These tests are split out so that we can run the tests without setUpTestData,
+    as those tests are running within a single transaction
+    """
+
+    available_apps = ["generic_relations"]
+
+    def setUp(self):
+        self.platypus = Animal.objects.create(
+            common_name="Platypus",
+            latin_name="Ornithorhynchus anatinus",
+        )
+
+    @from_codegen
+    def test_add_then_remove_after_prefetch(self):
+        furry_tag = self.platypus.tags.create(tag="furry")
+        platypus = Animal.objects.prefetch_related("tags").get(pk=self.platypus.pk)
+        self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
+        weird_tag = self.platypus.tags.create(tag="weird")
+        platypus.tags.add(weird_tag)
+        self.assertSequenceEqual(platypus.tags.all(), [furry_tag, weird_tag])
+        platypus.tags.remove(weird_tag)
+        self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
+
+    @generate_unasynced()
+    async def test_async_add_then_remove_after_prefetch(self):
+        async with new_connection(force_rollback=True):
+            furry_tag = await self.platypus.tags.acreate(tag="furry")
+            platypus = await Animal.objects.prefetch_related("tags").aget(
+                pk=self.platypus.pk
+            )
+            self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
+            weird_tag = await self.platypus.tags.acreate(tag="weird")
+            await platypus.tags.aadd(weird_tag)
+            self.assertSequenceEqual(
+                await alist(platypus.tags.all()), [furry_tag, weird_tag]
+            )
+            await platypus.tags.aremove(weird_tag)
+            self.assertSequenceEqual(await alist(platypus.tags.all()), [furry_tag])
