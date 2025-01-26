@@ -713,6 +713,7 @@ class GenericRelationsTests(TestCase):
         self.assertSequenceEqual(platypus.tags.all(), [furry_tag])
 
     @generate_unasynced()
+    async def atest_async_add_then_remove_after_prefetch(self):
         furry_tag = await self.platypus.tags.acreate(tag="furry")
         platypus = await Animal.objects.prefetch_related("tags").aget(
             pk=self.platypus.pk
