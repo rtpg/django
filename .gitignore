@@ -19,3 +19,6 @@ tests/report/
 tests/screenshots/
 
 .direnv
+
+*.sqlite3
+passed.tests
