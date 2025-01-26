@@ -1089,7 +1089,7 @@ class Model(AltersData, metaclass=ModelBase):
             context_manager = transaction.atomic(using=using, savepoint=False)
         else:
             context_manager = transaction.mark_for_rollback_on_error(using=using)
-        with context_manager:
+        async with context_manager:
             parent_inserted = False
             if not raw:
                 # Validate force insert only when parents are inserted.

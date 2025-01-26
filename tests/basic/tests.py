@@ -11,6 +11,7 @@ from django.db import (
     connection,
     connections,
     models,
+    new_connection,
     transaction,
 )
 from django.db.models.manager import BaseManager
@@ -22,6 +23,7 @@ from django.test import (
     skipUnlessDBFeature,
 )
 from django.test.utils import CaptureQueriesContext
+from django.utils.codegen import from_codegen, generate_unasynced
 from django.utils.connection import ConnectionDoesNotExist
 from django.utils.translation import gettext_lazy
 
@@ -376,29 +378,61 @@ class ModelTest(TestCase):
         )
         self.assertEqual(articles[0].undashedvalue, 2)
 
+    @from_codegen
     def test_create_relation_with_gettext_lazy(self):
         """
         gettext_lazy objects work when saving model instances
         through various methods. Refs #10498.
         """
-        notlazy = "test"
-        lazy = gettext_lazy(notlazy)
-        Article.objects.create(headline=lazy, pub_date=datetime.now())
-        article = Article.objects.get()
-        self.assertEqual(article.headline, notlazy)
-        # test that assign + save works with Promise objects
-        article.headline = lazy
-        article.save()
-        self.assertEqual(article.headline, notlazy)
-        # test .update()
-        Article.objects.update(headline=lazy)
-        article = Article.objects.get()
-        self.assertEqual(article.headline, notlazy)
-        # still test bulk_create()
-        Article.objects.all().delete()
-        Article.objects.bulk_create([Article(headline=lazy, pub_date=datetime.now())])
-        article = Article.objects.get()
-        self.assertEqual(article.headline, notlazy)
+        with new_connection(force_rollback=True):
+            notlazy = "test"
+            lazy = gettext_lazy(notlazy)
+            Article.objects.create(headline=lazy, pub_date=datetime.now())
+            article = Article.objects.get()
+            self.assertEqual(article.headline, notlazy)
+            # test that assign + save works with Promise objects
+            article.headline = lazy
+            article.save()
+            self.assertEqual(article.headline, notlazy)
+            # test .update()
+            Article.objects.update(headline=lazy)
+            article = Article.objects.get()
+            self.assertEqual(article.headline, notlazy)
+            # still test bulk_create()
+            Article.objects.all().delete()
+            Article.objects.bulk_create(
+                [Article(headline=lazy, pub_date=datetime.now())]
+            )
+            article = Article.objects.get()
+            self.assertEqual(article.headline, notlazy)
+
+    @generate_unasynced()
+    async def test_async_create_relation_with_gettext_lazy(self):
+        """
+        gettext_lazy objects work when saving model instances
+        through various methods. Refs #10498.
+        """
+        async with new_connection(force_rollback=True):
+            notlazy = "test"
+            lazy = gettext_lazy(notlazy)
+            await Article.objects.acreate(headline=lazy, pub_date=datetime.now())
+            article = await Article.objects.aget()
+            self.assertEqual(article.headline, notlazy)
+            # test that assign + save works with Promise objects
+            article.headline = lazy
+            await article.asave()
+            self.assertEqual(article.headline, notlazy)
+            # test .update()
+            await Article.objects.aupdate(headline=lazy)
+            article = await Article.objects.aget()
+            self.assertEqual(article.headline, notlazy)
+            # still test bulk_create()
+            await Article.objects.all().adelete()
+            await Article.objects.abulk_create(
+                [Article(headline=lazy, pub_date=datetime.now())]
+            )
+            article = await Article.objects.aget()
+            self.assertEqual(article.headline, notlazy)
 
     def test_emptyqs(self):
         msg = "EmptyQuerySet can't be instantiated"

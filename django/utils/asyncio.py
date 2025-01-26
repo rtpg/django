@@ -2,6 +2,8 @@ import os
 from asyncio import get_running_loop
 from functools import wraps
 
+from asgiref.sync import async_to_sync, sync_to_async
+
 from django.core.exceptions import SynchronousOnlyOperation
 
 
@@ -47,3 +49,6 @@ async def alist(to_consume):
     async for elt in to_consume:
         result.append(elt)
     return result
+
+
+agetattr = sync_to_async(getattr)
