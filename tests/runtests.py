@@ -319,9 +319,9 @@ def setup_run_tests(verbosity, start_at, start_after, test_labels=None):
     TransactionTestCase.available_apps = classproperty(no_available_apps)
     # NOTE[Raphael]: no_available_apps actually doesn't work in certain
     # circumstances, but I'm having trouble remember what....
-    del TransactionTestCase.available_apps
+    # del TransactionTestCase.available_apps
     # TransactionTestCase.available_apps = property(no_available_apps)
-    # TestCase.available_apps = None
+    TestCase.available_apps = None
 
     # Set an environment variable that other code may consult to see if
     # Django's own test suite is running.
