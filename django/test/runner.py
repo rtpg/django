@@ -656,12 +656,53 @@ class Shuffler:
         return [hashes[hashed] for hashed in sorted(hashes)]
 
 
+class SuccessTrackingTextTestResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.successes = []
+
+    def addSuccess(self, test):
+        super().addSuccess(test)
+        self.successes.append(test)
+
+
+class SuccessTrackingTextTestRunner(unittest.TextTestRunner):
+    resultclass = SuccessTrackingTextTestResult
+
+
+class PDBDebugResult(SuccessTrackingTextTestResult):
+    """
+    Custom result class that triggers a PDB session when an error or failure
+    occurs.
+    """
+
+    def addError(self, test, err):
+        super().addError(test, err)
+        self.debug(err)
+
+    def addFailure(self, test, err):
+        super().addFailure(test, err)
+        self.debug(err)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None:
+            self.debug(err)
+        super().addSubTest(test, subtest, err)
+
+    def debug(self, error):
+        self._restoreStdout()
+        self.buffer = False
+        exc_type, exc_value, traceback = error
+        print("\nOpening PDB: %r" % exc_value)
+        pdb.post_mortem(traceback)
+
+
 class DiscoverRunner:
-    """A Django test runner that uses unittest2 test discovery."""
+    """A Django tese runner that uses unittest2 test discovery."""
 
     test_suite = unittest.TestSuite
     parallel_test_suite = ParallelTestSuite
-    test_runner = unittest.TextTestRunner
+    test_runner = SuccessTrackingTextTestRunner
     test_loader = unittest.defaultTestLoader
     reorder_by = (TestCase, SimpleTestCase)
 
@@ -952,6 +993,20 @@ class DiscoverRunner:
         # _FailedTest objects include things like test modules that couldn't be
         # found or that couldn't be loaded due to syntax errors.
         test_types = (unittest.loader._FailedTest, *self.reorder_by)
+        try:
+            if os.environ.get("STEPWISE"):
+                with open("passed.tests", "r") as passed_tests_f:
+                    passed_tests = {
+                        l.strip() for l in passed_tests_f.read().splitlines()
+                    }
+            else:
+                passed_tests = set()
+        except FileNotFoundError:
+            passed_tests = set()
+
+        if len(passed_tests):
+            print("Filtering out previously passing tests")
+            all_tests = [t for t in all_tests if t.id() not in passed_tests]
         all_tests = list(
             reorder_tests(
                 all_tests,
@@ -1066,6 +1121,19 @@ class DiscoverRunner:
             )
         return databases
 
+    def _update_failed_tracking(self, result):
+        if result.wasSuccessful():
+            try:
+                print("Removing passed tests")
+                os.remove("passed.tests")
+            except FileNotFoundError:
+                pass
+        else:
+            passed_ids = [test.id() for test in result.successes]
+            with open("passed.tests", "a") as f:
+                f.write("\n".join(passed_ids))
+            print("Wrote passed tests")
+
     def run_tests(self, test_labels, **kwargs):
         """
         Run the unit tests for all the test labels in the provided list.
@@ -1088,6 +1156,7 @@ class DiscoverRunner:
                 serialized_aliases=suite.serialized_aliases,
             )
         run_failed = False
+        result = None
         try:
             self.run_checks(databases)
             result = self.run_suite(suite)
@@ -1095,6 +1164,8 @@ class DiscoverRunner:
             run_failed = True
             raise
         finally:
+            if result is not None:
+                self._update_failed_tracking(result)
             try:
                 with self.time_keeper.timed("Total database teardown"):
                     self.teardown_databases(old_config)
