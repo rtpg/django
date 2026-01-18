@@ -36,6 +36,8 @@ class BaseConnectionHandler:
     exception_class = ConnectionDoesNotExist
     thread_critical = False
 
+    LOG_HITS = False
+
     def __init__(self, settings=None):
         self._settings = settings
         self._connections = Local(self.thread_critical)
@@ -53,15 +55,29 @@ class BaseConnectionHandler:
     def create_connection(self, alias):
         raise NotImplementedError("Subclasses must implement create_connection().")
 
-    def __getitem__(self, alias):
+    from django.utils.asyncio import async_unsafe
+
+    def get_item(self, alias, raise_on_miss=False):
+        if self.LOG_HITS:
+            print(f"CH.__getitem__[{alias}]")
         try:
-            return getattr(self._connections, alias)
+            result = getattr(self._connections, alias)
+            if self.LOG_HITS:
+                print("CACHE HIT")
+            return result
         except AttributeError:
+            if raise_on_miss:
+                raise
+            if self.LOG_HITS:
+                print("CACHE MISS")
             if alias not in self.settings:
                 raise self.exception_class(f"The connection '{alias}' doesn't exist.")
         conn = self.create_connection(alias)
         setattr(self._connections, alias, conn)
         return conn
+
+    def __getitem__(self, alias):
+        return self.get_item(alias)
 
     def __setitem__(self, key, value):
         setattr(self._connections, key, value)

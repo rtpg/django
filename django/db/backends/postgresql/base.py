@@ -5,7 +5,10 @@ Requires psycopg2 >= 2.8.4 or psycopg >= 3.1.8
 """
 
 import asyncio
+import inspect
+import os
 import threading
+import traceback
 import warnings
 from contextlib import contextmanager
 
@@ -14,11 +17,16 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError as WrappedDatabaseError
 from django.db import connections
 from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
+from django.db.backends.utils import (
+    AsyncCursorDebugWrapper as AsyncBaseCursorDebugWrapper,
+)
 from django.db.backends.utils import CursorDebugWrapper as BaseCursorDebugWrapper
 from django.utils.asyncio import async_unsafe
 from django.utils.functional import cached_property
 from django.utils.safestring import SafeString
 from django.utils.version import get_version_tuple
+
+LOG_CREATIONS = False
 
 try:
     try:
@@ -86,9 +94,16 @@ def _get_varchar_column(data):
     return "varchar(%(max_length)s)" % data
 
 
+# HACK additions to make OTel instrumentation work properly
+Database.AsyncConnection.pq = Database.pq
+Database.Connection.pq = Database.pq
+
+
 class DatabaseWrapper(BaseDatabaseWrapper):
     vendor = "postgresql"
     display_name = "PostgreSQL"
+    supports_async = is_psycopg3
+
     # This dictionary maps Field objects to their associated PostgreSQL column
     # types, as strings. Column-type strings can contain format strings; they'll
     # be interpolated against the values of Field.__dict__ before being output.
@@ -181,6 +196,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     _named_cursor_idx = 0
     _connection_pools = {}
 
+    def __init__(self, *args, **kwargs):
+        self._creation_stack = "\n".join(traceback.format_stack())
+        super().__init__(*args, **kwargs)
+
     @property
     def pool(self):
         pool_options = self.settings_dict["OPTIONS"].get("pool")
@@ -234,7 +253,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         """
         return divmod(self.pg_version, 10000)
 
-    def get_connection_params(self):
+    def get_connection_params(self, for_async=False):
         settings_dict = self.settings_dict
         # None may be used to connect to the default 'postgres' db
         if settings_dict["NAME"] == "" and not settings_dict["OPTIONS"].get("service"):
@@ -274,14 +293,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             raise ImproperlyConfigured("Database pooling requires psycopg >= 3")
 
         server_side_binding = conn_params.pop("server_side_binding", None)
-        conn_params.setdefault(
-            "cursor_factory",
-            (
-                ServerBindingCursor
-                if is_psycopg3 and server_side_binding is True
-                else Cursor
-            ),
+        cursor_factory = self._get_cursor_factory(
+            server_side_binding, for_async=for_async
         )
+        conn_params.setdefault("cursor_factory", cursor_factory)
         if settings_dict["USER"]:
             conn_params["user"] = settings_dict["USER"]
         if settings_dict["PASSWORD"]:
@@ -301,8 +316,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             )
         return conn_params
 
-    @async_unsafe
-    def get_new_connection(self, conn_params):
+    def _get_isolation_level(self):
         # self.isolation_level must be set:
         # - after connecting to the database in order to obtain the database's
         #   default when no value is explicitly specified in options.
@@ -313,25 +327,30 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         try:
             isolation_level_value = options["isolation_level"]
         except KeyError:
-            self.isolation_level = IsolationLevel.READ_COMMITTED
+            isolation_level = IsolationLevel.READ_COMMITTED
         else:
-            # Set the isolation level to the value from OPTIONS.
             try:
-                self.isolation_level = IsolationLevel(isolation_level_value)
+                isolation_level = IsolationLevel(isolation_level_value)
                 set_isolation_level = True
             except ValueError:
                 raise ImproperlyConfigured(
                     f"Invalid transaction isolation level {isolation_level_value} "
                     f"specified. Use one of the psycopg.IsolationLevel values."
                 )
+        return isolation_level, set_isolation_level
+
+    @async_unsafe
+    def get_new_connection(self, conn_params):
+        isolation_level, set_isolation_level = self._get_isolation_level()
+        self.isolation_level = isolation_level
         if self.pool:
             # If nothing else has opened the pool, open it now.
             self.pool.open()
             connection = self.pool.getconn()
         else:
-            connection = self.Database.connect(**conn_params)
+            connection = Database.Connection.connect(**conn_params)
         if set_isolation_level:
-            connection.isolation_level = self.isolation_level
+            connection.isolation_level = isolation_level
         if not is_psycopg3:
             # Register dummy loads() to avoid a round trip from psycopg2's
             # decode to json.dumps() to json.loads(), when using a custom
@@ -365,6 +384,14 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             return True
         return False
 
+    async def _aconfigure_role(self, connection):
+        if new_role := self.settings_dict["OPTIONS"].get("assume_role"):
+            async with connection.acursor() as cursor:
+                sql = self.ops.compose_sql("SET ROLE %s", [new_role])
+                await cursor.aaexecute(sql)
+            return True
+        return False
+
     def _configure_connection(self, connection):
         # This function is called from init_connection_state and from the
         # psycopg pool itself after a connection is opened.
@@ -375,6 +402,19 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         # to login is not the same as the role that owns database resources. As
         # can be the case when using temporary or ephemeral credentials.
         commit_role = self._configure_role(connection)
+
+        return commit_role or commit_tz
+
+    async def _aconfigure_connection(self, connection):
+        # This function is called from init_connection_state and from the
+        # psycopg pool itself after a connection is opened.
+
+        # Commit after setting the time zone.
+        commit_tz = await self._aconfigure_timezone(connection)
+        # Set the role on the connection. This is useful if the credential used
+        # to login is not the same as the role that owns database resources. As
+        # can be the case when using temporary or ephemeral credentials.
+        commit_role = await self._aconfigure_role(connection)
 
         return commit_role or commit_tz
 

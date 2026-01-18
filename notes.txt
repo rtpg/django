@@ -1,0 +1,23 @@
+
+Running:
+
+tests/runtests.py --settings=test_postgresql generic_relations.tests --noinput
+
+^ spits out an "AsyncCursor.close was never aawaited" thing
+
+----
+
+I need to write out async with new_connection blocks in tests (maybe my codemod can look
+at an environment variable?)
+
+
+----
+
+assertNumQueries support in an async context....
+
+
+----
+
+skipUnlessDBFeature etc.... none of this stuff works with async tests. You can tell because test blocks with those labels are never awaited
+
+---
