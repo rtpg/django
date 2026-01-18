@@ -1,5 +1,6 @@
 from django.db.models import Count, Max, Q
 from django.test import TestCase
+from django.utils.codegen import from_codegen, generate_unasynced
 
 from .models import Comment, Tenant, User
 
@@ -137,7 +138,14 @@ class CompositePKAggregateTests(TestCase):
             (self.user_3, self.user_1, self.user_2),
         )
 
+    @from_codegen
     def test_max_pk(self):
         msg = "Max expression does not support composite primary keys."
         with self.assertRaisesMessage(ValueError, msg):
             Comment.objects.aggregate(Max("pk"))
+
+    @generate_unasynced()
+    async def test_async_max_pk(self):
+        msg = "Max expression does not support composite primary keys."
+        with self.assertRaisesMessage(ValueError, msg):
+            await Comment.objects.aaggregate(Max("pk"))

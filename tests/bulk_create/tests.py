@@ -8,6 +8,7 @@ from django.db import (
     OperationalError,
     ProgrammingError,
     connection,
+    new_connection,
 )
 from django.db.models import FileField, Value
 from django.db.models.functions import Lower, Now
@@ -17,6 +18,7 @@ from django.test import (
     skipIfDBFeature,
     skipUnlessDBFeature,
 )
+from django.utils.codegen import from_codegen, generate_unasynced
 
 from .models import (
     BigAutoFieldModel,
@@ -47,23 +49,45 @@ class BulkCreateTests(TestCase):
             Country(name="Czech Republic", iso_two_letter="CZ"),
         ]
 
+    @from_codegen
     def test_simple(self):
-        created = Country.objects.bulk_create(self.data)
-        self.assertEqual(created, self.data)
-        self.assertQuerySetEqual(
-            Country.objects.order_by("-name"),
-            [
-                "United States of America",
-                "The Netherlands",
-                "Germany",
-                "Czech Republic",
-            ],
-            attrgetter("name"),
-        )
+        with new_connection(force_rollback=True):
+            created = Country.objects.bulk_create(self.data)
+            self.assertEqual(created, self.data)
 
-        created = Country.objects.bulk_create([])
-        self.assertEqual(created, [])
-        self.assertEqual(Country.objects.count(), 4)
+            self.assertListEqual(
+                [c.name for c in Country.objects.order_by("-name")],
+                [
+                    "United States of America",
+                    "The Netherlands",
+                    "Germany",
+                    "Czech Republic",
+                ],
+            )
+
+            created = Country.objects.bulk_create([])
+            self.assertEqual(created, [])
+            self.assertEqual(Country.objects.count(), 4)
+
+    @generate_unasynced()
+    async def test_async_simple(self):
+        async with new_connection(force_rollback=True):
+            created = await Country.objects.abulk_create(self.data)
+            self.assertEqual(created, self.data)
+
+            self.assertListEqual(
+                [c.name async for c in Country.objects.order_by("-name")],
+                [
+                    "United States of America",
+                    "The Netherlands",
+                    "Germany",
+                    "Czech Republic",
+                ],
+            )
+
+            created = await Country.objects.abulk_create([])
+            self.assertEqual(created, [])
+            self.assertEqual(await Country.objects.acount(), 4)
 
     @skipUnlessDBFeature("has_bulk_insert")
     def test_efficiency(self):
@@ -92,26 +116,51 @@ class BulkCreateTests(TestCase):
         )
         self.assertEqual(Country.objects.count(), 4)
 
+    @from_codegen
     def test_multi_table_inheritance_unsupported(self):
-        expected_message = "Can't bulk create a multi-table inherited model"
-        with self.assertRaisesMessage(ValueError, expected_message):
-            Pizzeria.objects.bulk_create(
-                [
-                    Pizzeria(name="The Art of Pizza"),
-                ]
-            )
-        with self.assertRaisesMessage(ValueError, expected_message):
-            ProxyMultiCountry.objects.bulk_create(
-                [
-                    ProxyMultiCountry(name="Fillory", iso_two_letter="FL"),
-                ]
-            )
-        with self.assertRaisesMessage(ValueError, expected_message):
-            ProxyMultiProxyCountry.objects.bulk_create(
-                [
-                    ProxyMultiProxyCountry(name="Fillory", iso_two_letter="FL"),
-                ]
-            )
+        with new_connection(force_rollback=True):
+            expected_message = "Can't bulk create a multi-table inherited model"
+            with self.assertRaisesMessage(ValueError, expected_message):
+                Pizzeria.objects.bulk_create(
+                    [
+                        Pizzeria(name="The Art of Pizza"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                ProxyMultiCountry.objects.bulk_create(
+                    [
+                        ProxyMultiCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                ProxyMultiProxyCountry.objects.bulk_create(
+                    [
+                        ProxyMultiProxyCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
+
+    @generate_unasynced()
+    async def test_async_multi_table_inheritance_unsupported(self):
+        async with new_connection(force_rollback=True):
+            expected_message = "Can't bulk create a multi-table inherited model"
+            with self.assertRaisesMessage(ValueError, expected_message):
+                await Pizzeria.objects.abulk_create(
+                    [
+                        Pizzeria(name="The Art of Pizza"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                await ProxyMultiCountry.objects.abulk_create(
+                    [
+                        ProxyMultiCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
+            with self.assertRaisesMessage(ValueError, expected_message):
+                await ProxyMultiProxyCountry.objects.abulk_create(
+                    [
+                        ProxyMultiProxyCountry(name="Fillory", iso_two_letter="FL"),
+                    ]
+                )
 
     def test_proxy_inheritance_supported(self):
         ProxyCountry.objects.bulk_create(
@@ -253,20 +302,39 @@ class BulkCreateTests(TestCase):
             )
             self.assertLess(len(connection.queries), 10)
 
+    @from_codegen
     def test_explicit_batch_size(self):
-        objs = [TwoFields(f1=i, f2=i) for i in range(0, 4)]
-        num_objs = len(objs)
-        TwoFields.objects.bulk_create(objs, batch_size=1)
-        self.assertEqual(TwoFields.objects.count(), num_objs)
-        TwoFields.objects.all().delete()
-        TwoFields.objects.bulk_create(objs, batch_size=2)
-        self.assertEqual(TwoFields.objects.count(), num_objs)
-        TwoFields.objects.all().delete()
-        TwoFields.objects.bulk_create(objs, batch_size=3)
-        self.assertEqual(TwoFields.objects.count(), num_objs)
-        TwoFields.objects.all().delete()
-        TwoFields.objects.bulk_create(objs, batch_size=num_objs)
-        self.assertEqual(TwoFields.objects.count(), num_objs)
+        with new_connection(force_rollback=True):
+            objs = [TwoFields(f1=i, f2=i) for i in range(0, 4)]
+            num_objs = len(objs)
+            TwoFields.objects.bulk_create(objs, batch_size=1)
+            self.assertEqual(TwoFields.objects.count(), num_objs)
+            TwoFields.objects.all().delete()
+            TwoFields.objects.bulk_create(objs, batch_size=2)
+            self.assertEqual(TwoFields.objects.count(), num_objs)
+            TwoFields.objects.all().delete()
+            TwoFields.objects.bulk_create(objs, batch_size=3)
+            self.assertEqual(TwoFields.objects.count(), num_objs)
+            TwoFields.objects.all().delete()
+            TwoFields.objects.bulk_create(objs, batch_size=num_objs)
+            self.assertEqual(TwoFields.objects.count(), num_objs)
+
+    @generate_unasynced()
+    async def test_async_explicit_batch_size(self):
+        async with new_connection(force_rollback=True):
+            objs = [TwoFields(f1=i, f2=i) for i in range(0, 4)]
+            num_objs = len(objs)
+            await TwoFields.objects.abulk_create(objs, batch_size=1)
+            self.assertEqual(await TwoFields.objects.acount(), num_objs)
+            await TwoFields.objects.all().adelete()
+            await TwoFields.objects.abulk_create(objs, batch_size=2)
+            self.assertEqual(await TwoFields.objects.acount(), num_objs)
+            await TwoFields.objects.all().adelete()
+            await TwoFields.objects.abulk_create(objs, batch_size=3)
+            self.assertEqual(await TwoFields.objects.acount(), num_objs)
+            await TwoFields.objects.all().adelete()
+            await TwoFields.objects.abulk_create(objs, batch_size=num_objs)
+            self.assertEqual(await TwoFields.objects.acount(), num_objs)
 
     def test_empty_model(self):
         NoFields.objects.bulk_create([NoFields() for i in range(2)])
@@ -441,6 +509,12 @@ class BulkCreateTests(TestCase):
         msg = "Batch size must be a positive integer."
         with self.assertRaisesMessage(ValueError, msg):
             Country.objects.bulk_create([], batch_size=-1)
+
+    async def test_invalid_batch_size_exception_async(self):
+        msg = "Batch size must be a positive integer."
+        async with new_connection(force_rollback=True):
+            with self.assertRaisesMessage(ValueError, msg):
+                await Country.objects.abulk_create([], batch_size=-1)
 
     @skipIfDBFeature("supports_update_conflicts")
     def test_update_conflicts_unsupported(self):

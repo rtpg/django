@@ -1,8 +1,9 @@
 import datetime
 
-from django.db import connection
+from django.db import connection, new_connection
 from django.test import TestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
+from django.utils.codegen import from_codegen, generate_unasynced
 
 from .models import DumbCategory, NonIntegerPKReturningModel, ReturningModel
 
@@ -45,11 +46,28 @@ class ReturningValuesTests(TestCase):
         self.assertTrue(obj.pk)
         self.assertIsInstance(obj.created, datetime.datetime)
 
-    @skipUnlessDBFeature("can_return_rows_from_bulk_insert")
+    # XXX need to put this back in, after I figure out how to support this with
+    # async tests....
+    # @skipUnlessDBFeature("can_return_rows_from_bulk_insert")
+    @from_codegen
     def test_bulk_insert(self):
-        objs = [ReturningModel(), ReturningModel(pk=2**11), ReturningModel()]
-        ReturningModel.objects.bulk_create(objs)
-        for obj in objs:
-            with self.subTest(obj=obj):
-                self.assertTrue(obj.pk)
-                self.assertIsInstance(obj.created, datetime.datetime)
+        with new_connection(force_rollback=True):
+            objs = [ReturningModel(), ReturningModel(pk=2**11), ReturningModel()]
+            ReturningModel.objects.bulk_create(objs)
+            for obj in objs:
+                with self.subTest(obj=obj):
+                    self.assertTrue(obj.pk)
+                    self.assertIsInstance(obj.created, datetime.datetime)
+
+    # XXX need to put this back in, after I figure out how to support this with
+    # async tests....
+    # @skipUnlessDBFeature("can_return_rows_from_bulk_insert")
+    @generate_unasynced()
+    async def test_async_bulk_insert(self):
+        async with new_connection(force_rollback=True):
+            objs = [ReturningModel(), ReturningModel(pk=2**11), ReturningModel()]
+            await ReturningModel.objects.abulk_create(objs)
+            for obj in objs:
+                with self.subTest(obj=obj):
+                    self.assertTrue(obj.pk)
+                    self.assertIsInstance(obj.created, datetime.datetime)

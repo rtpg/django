@@ -10,13 +10,15 @@ from django.test import (
     AsyncClient,
     Client,
     TestCase,
+    TransactionTestCase,
     modify_settings,
     override_settings,
 )
 
 
 @override_settings(ROOT_URLCONF="auth_tests.urls")
-class RemoteUserTest(TestCase):
+class RemoteUserTest(TransactionTestCase):
+    available_apps = ["auth_tests", "django.contrib.auth", "django.contrib.admin"]
     middleware = "django.contrib.auth.middleware.RemoteUserMiddleware"
     backend = "django.contrib.auth.backends.RemoteUserBackend"
     header = "REMOTE_USER"
